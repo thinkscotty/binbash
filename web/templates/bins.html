@@ -1,0 +1,38 @@
+{{define "content"}}
+<section class="card">
+  <h1>Bins</h1>
+  <p class="subtle">Create a storage container, then add items to it.</p>
+  {{if .Error}}
+    <p class="error">{{.Error}}</p>
+  {{end}}
+  <form method="POST" action="/bins">
+    <label for="name">Name</label>
+    <input type="text" id="name" name="name" value="{{.Name}}" autofocus required>
+    <label for="category">Category <span class="subtle">(optional)</span></label>
+    <input type="text" id="category" name="category" value="{{.Category}}">
+    <label for="description">Description <span class="subtle">(optional)</span></label>
+    <textarea id="description" name="description" rows="2">{{.Description}}</textarea>
+    <button type="submit">Add bin</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>All bins</h2>
+  {{if .Bins}}
+    <ul class="bin-list">
+      {{range .Bins}}
+        <li class="bin-row">
+          <div>
+            <strong>{{.Name}}</strong>
+            {{if .Category}}<span class="badge">{{.Category}}</span>{{end}}
+            {{if .Description}}<p class="subtle">{{.Description}}</p>{{end}}
+          </div>
+          <a href="/bins/{{.ID}}/edit">Edit</a>
+        </li>
+      {{end}}
+    </ul>
+  {{else}}
+    <p class="subtle">No bins yet — add your first one above.</p>
+  {{end}}
+</section>
+{{end}}

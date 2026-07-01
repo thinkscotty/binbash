@@ -1,0 +1,18 @@
+{{define "content"}}
+<section class="card">
+  <h1>Edit bin</h1>
+  {{if .Error}}
+    <p class="error">{{.Error}}</p>
+  {{end}}
+  <form method="POST" action="/bins/{{.Bin.ID}}">
+    <label for="name">Name</label>
+    <input type="text" id="name" name="name" value="{{.Bin.Name}}" autofocus required>
+    <label for="category">Category <span class="subtle">(optional)</span></label>
+    <input type="text" id="category" name="category" value="{{.Bin.Category}}">
+    <label for="description">Description <span class="subtle">(optional)</span></label>
+    <textarea id="description" name="description" rows="2">{{.Bin.Description}}</textarea>
+    <button type="submit">Save changes</button>
+  </form>
+  <a class="back-link" href="/bins">&larr; Back to bins</a>
+</section>
+{{end}}
