@@ -5,3 +5,9 @@
 *.db-wal
 .env
 /binbash
+
+# Planning/reference docs kept local-only, not published to GitHub
+/PLAN.md
+/ARCHITECTURE.md
+/binbash_initial_idea.md
+/CLAUDE.md
