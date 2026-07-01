@@ -1,0 +1,19 @@
+CREATE TABLE bins (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    category TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE items (
+    id INTEGER PRIMARY KEY,
+    bin_id INTEGER NOT NULL REFERENCES bins(id),
+    name TEXT NOT NULL,
+    description TEXT,
+    keywords TEXT,
+    ai_tagged INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
