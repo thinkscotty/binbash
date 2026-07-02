@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bufio"
+	"bytes"
 	"database/sql"
 	"encoding/csv"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -19,6 +22,38 @@ const (
 	autoBackupKeepFiles     = 5
 	maxImportFileSize       = 10 << 20 // 10MB
 )
+
+// backupFilenamePattern matches exactly the "binbash-YYYYMMDD-HHMMSS.csv"
+// format auto-backups are written with. pruneOldBackups only ever deletes
+// files matching this precisely, so if AutoBackupDir is ever pointed at a
+// directory shared with something else, an unrelated file that merely starts
+// with "binbash-" and ends in ".csv" won't get swept up in retention.
+var backupFilenamePattern = regexp.MustCompile(`^binbash-\d{8}-\d{6}\.csv$`)
+
+// csvFormulaPrefixes are leading characters that spreadsheet programs (Excel,
+// Sheets, LibreOffice) may interpret as the start of a formula when a CSV is
+// opened in them ("CSV/formula injection"). Since the whole point of the
+// export is to be opened in a spreadsheet, fields starting with one of these
+// are defused with a leading single quote, which spreadsheet programs treat
+// as "force this cell to plain text".
+const csvFormulaPrefixes = "=+-@"
+
+// sanitizeCSVField defuses a field for safe opening in a spreadsheet program.
+func sanitizeCSVField(s string) string {
+	if s != "" && strings.ContainsRune(csvFormulaPrefixes, rune(s[0])) {
+		return "'" + s
+	}
+	return s
+}
+
+// desanitizeCSVField reverses sanitizeCSVField, so re-importing binbash's own
+// export round-trips exactly instead of accumulating a leading quote.
+func desanitizeCSVField(s string) string {
+	if len(s) >= 2 && s[0] == '\'' && strings.ContainsRune(csvFormulaPrefixes, rune(s[1])) {
+		return s[1:]
+	}
+	return s
+}
 
 var backupCSVHeader = []string{"item_name", "item_description", "keywords", "bin_name", "bin_category", "bin_description"}
 
@@ -33,7 +68,10 @@ func (h *Handlers) ExportBackup(w http.ResponseWriter, r *http.Request) {
 		log.Printf("export backup: %v", err)
 		return
 	}
-	if err := h.markBackupDone(); err != nil {
+	h.backupMu.Lock()
+	err := h.markBackupDone()
+	h.backupMu.Unlock()
+	if err != nil {
 		log.Printf("export backup: mark done: %v", err)
 	}
 }
@@ -52,7 +90,15 @@ func (h *Handlers) ImportBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	records, err := csv.NewReader(file).ReadAll()
+	// Spreadsheet programs (notably Excel on Windows) commonly prepend a UTF-8
+	// BOM when saving a CSV. Strip it so a user's own re-saved export still
+	// matches the expected header instead of being rejected as unrecognized.
+	buffered := bufio.NewReader(file)
+	if bom, err := buffered.Peek(3); err == nil && bytes.Equal(bom, []byte{0xEF, 0xBB, 0xBF}) {
+		buffered.Discard(3)
+	}
+
+	records, err := csv.NewReader(buffered).ReadAll()
 	if err != nil {
 		h.renderBackup(w, map[string]any{"Error": "That file couldn't be parsed as CSV."})
 		return
@@ -71,12 +117,12 @@ func (h *Handlers) ImportBackup(w http.ResponseWriter, r *http.Request) {
 	rows := make([]importRow, 0, len(records)-1)
 	for i, rec := range records[1:] {
 		row := importRow{
-			itemName:        strings.TrimSpace(rec[0]),
-			itemDescription: strings.TrimSpace(rec[1]),
-			keywords:        strings.TrimSpace(rec[2]),
-			binName:         strings.TrimSpace(rec[3]),
-			binCategory:     strings.TrimSpace(rec[4]),
-			binDescription:  strings.TrimSpace(rec[5]),
+			itemName:        desanitizeCSVField(strings.TrimSpace(rec[0])),
+			itemDescription: desanitizeCSVField(strings.TrimSpace(rec[1])),
+			keywords:        desanitizeCSVField(strings.TrimSpace(rec[2])),
+			binName:         desanitizeCSVField(strings.TrimSpace(rec[3])),
+			binCategory:     desanitizeCSVField(strings.TrimSpace(rec[4])),
+			binDescription:  desanitizeCSVField(strings.TrimSpace(rec[5])),
 		}
 		if formErr := validateImportRow(row.itemName, row.itemDescription, row.keywords, row.binName, row.binCategory, row.binDescription); formErr != "" {
 			h.renderBackup(w, map[string]any{"Error": fmt.Sprintf("Row %d: %s", i+2, formErr)})
@@ -219,7 +265,10 @@ func (h *Handlers) writeCSVTo(w io.Writer) (int, error) {
 		if err := rows.Scan(&itemName, &itemDescription, &keywords, &binName, &binCategory, &binDescription); err != nil {
 			return count, err
 		}
-		if err := cw.Write([]string{itemName, itemDescription, keywords, binName, binCategory, binDescription}); err != nil {
+		if err := cw.Write([]string{
+			sanitizeCSVField(itemName), sanitizeCSVField(itemDescription), sanitizeCSVField(keywords),
+			sanitizeCSVField(binName), sanitizeCSVField(binCategory), sanitizeCSVField(binDescription),
+		}); err != nil {
 			return count, err
 		}
 		count++
@@ -240,6 +289,9 @@ func (h *Handlers) writeCSVTo(w io.Writer) (int, error) {
 // Failures are logged rather than surfaced: this is a best-effort convenience
 // feature that must never break a page load.
 func (h *Handlers) checkAndRunAutoBackup() (newItems int, lastBackupAt sql.NullTime) {
+	h.backupMu.Lock()
+	defer h.backupMu.Unlock()
+
 	var maxItemID int64
 	if err := h.DB.QueryRow(
 		`SELECT last_backup_at, last_backup_max_item_id FROM backup_state WHERE id = 1`,
@@ -257,17 +309,30 @@ func (h *Handlers) checkAndRunAutoBackup() (newItems int, lastBackupAt sql.NullT
 		return newItems, lastBackupAt
 	}
 
-	filename := filepath.Join(h.AutoBackupDir, fmt.Sprintf("binbash-%s.csv", time.Now().Format("20060102-150405")))
-	f, err := os.Create(filename)
+	filename := fmt.Sprintf("binbash-%s.csv", time.Now().Format("20060102-150405"))
+	finalPath := filepath.Join(h.AutoBackupDir, filename)
+	// Write to a hidden temp file first and rename into place only once the
+	// write fully succeeds, so a crash or power loss mid-write (this app's
+	// homelab/VPS deployment target makes that a real possibility) can never
+	// leave a truncated, corrupt file sitting under a name that looks like a
+	// valid backup -- which would otherwise count toward retention and could
+	// end up evicting a good backup in its place.
+	tmpPath := filepath.Join(h.AutoBackupDir, "."+filename+".tmp")
+	f, err := os.Create(tmpPath)
 	if err != nil {
-		log.Printf("auto-backup: create %s: %v", filename, err)
+		log.Printf("auto-backup: create %s: %v", tmpPath, err)
 		return newItems, lastBackupAt
 	}
 	_, writeErr := h.writeCSVTo(f)
 	closeErr := f.Close()
 	if writeErr != nil || closeErr != nil {
-		log.Printf("auto-backup: write %s: write=%v close=%v", filename, writeErr, closeErr)
-		os.Remove(filename)
+		log.Printf("auto-backup: write %s: write=%v close=%v", tmpPath, writeErr, closeErr)
+		os.Remove(tmpPath)
+		return newItems, lastBackupAt
+	}
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		log.Printf("auto-backup: rename %s -> %s: %v", tmpPath, finalPath, err)
+		os.Remove(tmpPath)
 		return newItems, lastBackupAt
 	}
 
@@ -276,7 +341,7 @@ func (h *Handlers) checkAndRunAutoBackup() (newItems int, lastBackupAt sql.NullT
 		return newItems, lastBackupAt
 	}
 	h.pruneOldBackups()
-	log.Printf("auto-backup: wrote %s (%d items)", filename, newItems)
+	log.Printf("auto-backup: wrote %s (%d items)", finalPath, newItems)
 
 	return 0, sql.NullTime{Time: time.Now(), Valid: true}
 }
@@ -303,7 +368,7 @@ func (h *Handlers) pruneOldBackups() {
 	var names []string
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasPrefix(name, "binbash-") || !strings.HasSuffix(name, ".csv") {
+		if e.IsDir() || !backupFilenamePattern.MatchString(name) {
 			continue
 		}
 		names = append(names, name)

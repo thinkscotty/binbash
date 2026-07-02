@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -31,6 +32,21 @@ func (h *Handlers) CreateBin(w http.ResponseWriter, r *http.Request) {
 	if formErr := validateBin(name, category, description); formErr != "" {
 		h.renderBins(w, map[string]any{
 			"Error":       formErr,
+			"Name":        name,
+			"Description": description,
+			"Category":    category,
+		})
+		return
+	}
+
+	taken, err := h.binNameTaken(name, 0)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if taken {
+		h.renderBins(w, map[string]any{
+			"Error":       fmt.Sprintf("A bin named %q already exists.", name),
 			"Name":        name,
 			"Description": description,
 			"Category":    category,
@@ -92,6 +108,19 @@ func (h *Handlers) UpdateBin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	taken, err := h.binNameTaken(name, id)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if taken {
+		h.render(w, "bin_edit.html", map[string]any{
+			"Error": fmt.Sprintf("A bin named %q already exists.", name),
+			"Bin":   Bin{ID: id, Name: name, Description: description, Category: category},
+		})
+		return
+	}
+
 	res, err := h.DB.Exec(
 		`UPDATE bins SET name = ?, description = ?, category = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 		name, description, category, id,
@@ -112,6 +141,14 @@ func (h *Handlers) UpdateBin(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) binExists(id int64) (bool, error) {
 	var n int
 	err := h.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM bins WHERE id = ?)`, id).Scan(&n)
+	return n == 1, err
+}
+
+// binNameTaken reports whether a bin other than excludeID already has name.
+// excludeID is 0 (never a real bin id) when checking a brand new bin.
+func (h *Handlers) binNameTaken(name string, excludeID int64) (bool, error) {
+	var n int
+	err := h.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM bins WHERE name = ? AND id != ?)`, name, excludeID).Scan(&n)
 	return n == 1, err
 }
 

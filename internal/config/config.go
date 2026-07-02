@@ -6,6 +6,20 @@ import (
 	"os"
 )
 
+// Bootstrap password length limits. These mirror minPasswordLen/
+// maxPasswordLen in internal/handlers/validation.go, which govern in-app
+// password rotation -- duplicated here (rather than imported) to avoid the
+// config package depending on the handlers package. maxBootstrapPasswordLen
+// is bcrypt's hard limit, in bytes: bcrypt.GenerateFromPassword returns a
+// hard error above it rather than truncating, so without this check a too-long
+// BINBASH_PASSWORD would make the app fail to start with a bcrypt error deep
+// in the auth bootstrap path, with nothing telling the operator that password
+// length is the actual problem.
+const (
+	minBootstrapPasswordLen = 8
+	maxBootstrapPasswordLen = 72
+)
+
 type Config struct {
 	Port          string
 	Password      string
@@ -29,6 +43,12 @@ func Load() (*Config, error) {
 
 	if cfg.Password == "" {
 		return nil, fmt.Errorf("BINBASH_PASSWORD must be set")
+	}
+	if len(cfg.Password) < minBootstrapPasswordLen {
+		return nil, fmt.Errorf("BINBASH_PASSWORD must be at least %d characters", minBootstrapPasswordLen)
+	}
+	if len(cfg.Password) > maxBootstrapPasswordLen {
+		return nil, fmt.Errorf("BINBASH_PASSWORD must be at most %d bytes long", maxBootstrapPasswordLen)
 	}
 
 	return cfg, nil

@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"sync"
 
 	"github.com/thinkscotty/binbash/internal/auth"
 )
@@ -21,6 +22,14 @@ type Handlers struct {
 	Auth          *auth.Auth
 	Templates     Templates
 	AutoBackupDir string
+
+	// backupMu serializes checkAndRunAutoBackup's read-decide-write sequence
+	// against itself and against ExportBackup's markBackupDone call. Those are
+	// each several separate DB round trips rather than a single transaction,
+	// so without this lock, concurrent requests (e.g. two browser tabs loading
+	// the search page at once) can all read the same stale backup watermark
+	// and race to write the same timestamped auto-backup file.
+	backupMu sync.Mutex
 }
 
 func New(db *sql.DB, a *auth.Auth, templates Templates, autoBackupDir string) *Handlers {
