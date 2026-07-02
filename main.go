@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/thinkscotty/binbash/internal/ai"
 	"github.com/thinkscotty/binbash/internal/auth"
 	"github.com/thinkscotty/binbash/internal/config"
 	"github.com/thinkscotty/binbash/internal/db"
@@ -62,7 +63,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("auth: %v", err)
 	}
-	h := handlers.New(database, a, templates, cfg.AutoBackupDir)
+
+	var aiClient *ai.Client
+	if cfg.AIEnabled() {
+		aiClient = ai.New(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModel)
+	}
+	h := handlers.New(database, a, templates, cfg.AutoBackupDir, aiClient, cfg.AITagCount, cfg.AITagBreadth)
 
 	static, err := fs.Sub(staticFS, "web/static")
 	if err != nil {
@@ -87,6 +93,7 @@ func main() {
 	mux.HandleFunc("POST /items", h.CreateItem)
 	mux.HandleFunc("GET /items/{id}/edit", h.EditItemForm)
 	mux.HandleFunc("POST /items/{id}", h.UpdateItem)
+	mux.HandleFunc("POST /items/tag", h.TagItems)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
 
 	addr := ":" + cfg.Port

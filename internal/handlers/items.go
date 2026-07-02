@@ -210,5 +210,11 @@ func (h *Handlers) renderItems(w http.ResponseWriter, data map[string]any) {
 	}
 	data["Bins"] = bins
 	data["Items"] = items
+	data["AIEnabled"] = h.AI != nil
+	if h.AI != nil {
+		var untagged int
+		h.DB.QueryRow(`SELECT COUNT(*) FROM items WHERE ai_tagged = 0`).Scan(&untagged)
+		data["UntaggedCount"] = untagged
+	}
 	h.render(w, "items.html", data)
 }

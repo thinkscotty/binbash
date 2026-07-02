@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/thinkscotty/binbash/internal/ai"
 	"github.com/thinkscotty/binbash/internal/auth"
 )
 
@@ -22,6 +23,9 @@ type Handlers struct {
 	Auth          *auth.Auth
 	Templates     Templates
 	AutoBackupDir string
+	AI            *ai.Client // nil when AI tagging is disabled
+	AITagCount    int
+	AITagBreadth  string
 
 	// backupMu serializes checkAndRunAutoBackup's read-decide-write sequence
 	// against itself and against ExportBackup's markBackupDone call. Those are
@@ -32,8 +36,11 @@ type Handlers struct {
 	backupMu sync.Mutex
 }
 
-func New(db *sql.DB, a *auth.Auth, templates Templates, autoBackupDir string) *Handlers {
-	return &Handlers{DB: db, Auth: a, Templates: templates, AutoBackupDir: autoBackupDir}
+func New(db *sql.DB, a *auth.Auth, templates Templates, autoBackupDir string, aiClient *ai.Client, aiTagCount int, aiTagBreadth string) *Handlers {
+	return &Handlers{
+		DB: db, Auth: a, Templates: templates, AutoBackupDir: autoBackupDir,
+		AI: aiClient, AITagCount: aiTagCount, AITagBreadth: aiTagBreadth,
+	}
 }
 
 func (h *Handlers) render(w http.ResponseWriter, page string, data any) {

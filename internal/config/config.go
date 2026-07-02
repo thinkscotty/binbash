@@ -4,6 +4,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 )
 
 // Bootstrap password length limits. These mirror minPasswordLen/
@@ -18,6 +20,9 @@ import (
 const (
 	minBootstrapPasswordLen = 8
 	maxBootstrapPasswordLen = 72
+
+	defaultAITagCount = 3
+	maxAITagCount     = 8
 )
 
 type Config struct {
@@ -27,6 +32,8 @@ type Config struct {
 	AIBaseURL     string
 	AIAPIKey      string
 	AIModel       string
+	AITagCount    int
+	AITagBreadth  string
 	AutoBackupDir string
 }
 
@@ -50,6 +57,19 @@ func Load() (*Config, error) {
 	if len(cfg.Password) > maxBootstrapPasswordLen {
 		return nil, fmt.Errorf("BINBASH_PASSWORD must be at most %d bytes long", maxBootstrapPasswordLen)
 	}
+
+	tagCountStr := getEnv("BINBASH_AI_TAG_COUNT", strconv.Itoa(defaultAITagCount))
+	tagCount, err := strconv.Atoi(tagCountStr)
+	if err != nil || tagCount < 0 || tagCount > maxAITagCount {
+		return nil, fmt.Errorf("BINBASH_AI_TAG_COUNT must be a number between 0 and %d", maxAITagCount)
+	}
+	cfg.AITagCount = tagCount
+
+	breadth := strings.ToLower(getEnv("BINBASH_AI_TAG_BREADTH", "moderate"))
+	if breadth != "narrow" && breadth != "moderate" && breadth != "broad" {
+		return nil, fmt.Errorf("BINBASH_AI_TAG_BREADTH must be one of: narrow, moderate, broad")
+	}
+	cfg.AITagBreadth = breadth
 
 	return cfg, nil
 }

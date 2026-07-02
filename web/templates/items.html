@@ -4,6 +4,9 @@
   {{if .Error}}
     <p class="error">{{.Error}}</p>
   {{end}}
+  {{if .Success}}
+    <p class="subtle">{{.Success}}</p>
+  {{end}}
   {{if .Bins}}
   <form method="POST" action="/items">
     <label for="name">Item name</label>
@@ -26,6 +29,20 @@
     <a class="button-link" href="/bins">Create a bin</a>
   {{end}}
 </section>
+
+{{if .AIEnabled}}
+<section class="card">
+  <h2>AI Tagging</h2>
+  {{if gt .UntaggedCount 0}}
+    <p class="subtle">{{.UntaggedCount}} item(s) haven't been AI-tagged yet.</p>
+    <form method="POST" action="/items/tag">
+      <button type="submit">Tag up to 25 items</button>
+    </form>
+  {{else}}
+    <p class="subtle">All items are tagged.</p>
+  {{end}}
+</section>
+{{end}}
 
 <section class="card">
   <h2>Recent items</h2>
