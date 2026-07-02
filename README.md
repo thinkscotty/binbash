@@ -17,12 +17,17 @@ Then visit http://localhost:8080 and sign in with the password above.
 
 ### Configuration
 
-All configuration is via environment variables:
+Configure binbash with a TOML file, environment variables, or both. A file is usually easier to keep around; env vars always win if both set the same value, so a single one can still be overridden at runtime (e.g. Docker's `-e`) without touching the file.
+
+**Config file**: copy [`binbash.example.toml`](binbash.example.toml) to `binbash.toml` in the directory you run the binary from, and fill in what you need — every field is optional and commented. To use a file at a different path or name, point `BINBASH_CONFIG` at it instead of relying on that default lookup.
+
+**Environment variables** (each overrides its config-file counterpart):
 
 | Var | Default | Purpose |
 |---|---|---|
+| `BINBASH_CONFIG` | `./binbash.toml` | Path to the config file. Not itself overridable by the file, for obvious reasons. |
 | `BINBASH_PORT` | `8080` | HTTP listen port |
-| `BINBASH_PASSWORD` | *(required)* | Initial login password, used to bootstrap the account on first run. Change it in-app via "Change password" afterward — the database, not this variable, is the source of truth from then on. |
+| `BINBASH_PASSWORD` | *(required, file or env)* | Initial login password, used to bootstrap the account on first run. Change it in-app via "Change password" afterward — the database, not this variable, is the source of truth from then on. |
 | `BINBASH_DB_PATH` | `./data/binbash.db` | SQLite file location |
 | `BINBASH_AI_BASE_URL` | *(unset = AI tagging disabled)* | OpenAI-compatible endpoint. Include any path prefix the provider needs (e.g. `https://api.openai.com/v1`) — `/chat/completions` is appended directly. |
 | `BINBASH_AI_API_KEY` | *(unset)* | API key for the AI endpoint |
@@ -37,7 +42,9 @@ Visit **Backup** in the nav to download a CSV of your whole inventory (one row p
 
 ## AI tagging
 
-Set `BINBASH_AI_BASE_URL` (plus `BINBASH_AI_API_KEY` and `BINBASH_AI_MODEL` as your provider requires) to enable AI tagging. Once configured, the **Items** page shows a "Tag up to 25 items" button that asks the AI for search-friendly keyword suggestions (synonyms, alternate names, categories) for items that haven't been tagged yet, and appends them to each item's existing keywords — it never edits or removes what's already there. Once an item is tagged it's skipped by future runs, even if it ended up with zero suggestions; re-click the button to work through a larger backlog in batches of 25.
+Set `BINBASH_AI_BASE_URL` (plus `BINBASH_AI_API_KEY` and `BINBASH_AI_MODEL` as your provider requires) to enable AI tagging. Once configured, the **Items** page shows a "Tag up to 25 items" button that asks the AI for search-friendly keyword suggestions (synonyms, alternate names, categories) for items that haven't been tagged yet, and appends them to each item's existing keywords — it never edits or removes what's already there. Once an item is successfully tagged it's skipped by future runs; an item whose response came back with no usable tags is left untagged so a later run retries it, rather than being marked done with nothing. Re-click the button to work through a larger backlog in batches of 25.
+
+Any OpenAI-compatible endpoint works, including reasoning models (Qwen3, DeepSeek-R1, etc.) — those spend part of their reply "thinking" before answering, so binbash requests a generous token budget to let them finish and still return tags.
 
 ## Building
 
@@ -68,6 +75,8 @@ echo "BINBASH_PASSWORD=changeme" | sudo tee /opt/binbash/.env
 sudo chown -R binbash:binbash /opt/binbash
 sudo systemctl enable --now binbash
 ```
+
+Prefer a config file over the `.env`? Since the unit's `WorkingDirectory` is `/opt/binbash`, dropping a `binbash.toml` there (`sudo cp binbash.example.toml /opt/binbash/binbash.toml`, then edit it) is picked up automatically with no changes to the unit file.
 
 ### Docker
 

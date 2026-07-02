@@ -54,6 +54,7 @@
             <strong>{{.Name}}</strong>
             <span class="badge">{{.BinName}}</span>
             {{if .Description}}<p class="subtle">{{.Description}}</p>{{end}}
+            {{if .Keywords}}<p class="item-keywords"><span class="subtle">Keywords:</span> {{.Keywords}}</p>{{end}}
           </div>
           <a href="/items/{{.ID}}/edit">Edit</a>
         </li>

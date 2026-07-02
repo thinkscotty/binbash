@@ -13,6 +13,16 @@ import (
 	"time"
 )
 
+// maxCompletionTokens caps the model's reply length. It's set generously
+// because reasoning models (e.g. Qwen3, DeepSeek-R1 style) spend most of
+// their output "thinking" -- often in a separate reasoning_content field --
+// before emitting the actual answer in content. Too low a cap (the previous
+// 200) truncated them mid-thought, so content came back empty and no tags
+// were parsed. 2048 gives a reasoning model room to finish and still return
+// its tags; if a model somehow blows past even this, the handler treats the
+// empty result as "retry later" rather than marking the item done.
+const maxCompletionTokens = 2048
+
 // Client talks to an OpenAI-compatible chat completions endpoint at
 // baseURL + "/chat/completions". Any provider that speaks this shape
 // (OpenAI, Chutes.ai, or a compatibility layer in front of Gemini/Claude)
@@ -82,7 +92,7 @@ func (c *Client) TagItem(ctx context.Context, item ItemContext, tagCount int, br
 			{Role: "user", Content: userPrompt(item)},
 		},
 		Temperature: 0.3,
-		MaxTokens:   200,
+		MaxTokens:   maxCompletionTokens,
 	}
 	body, err := json.Marshal(reqBody)
 	if err != nil {
@@ -146,18 +156,30 @@ func parseTags(content string, max int) []string {
 }
 
 func systemPrompt(tagCount int, breadth string) string {
-	var guidance string
+	// example pairs each breadth with a one-shot demonstration for the same
+	// input ("London Lego Set"), so the model sees not just an instruction but
+	// a worked example of expanding *beyond* the item's own name at the right
+	// breadth. Keeping the example input constant across breadths makes the
+	// difference between the levels legible: narrow stays on alternate names,
+	// broad reaches out to themes and use cases.
+	var guidance, example string
 	switch breadth {
 	case "narrow":
 		guidance = "Suggest only close synonyms and alternate names for the item — nothing broader."
+		example = "building blocks, brick set, construction toy"
 	case "broad":
 		guidance = "Suggest synonyms, alternate names, general categories, and common use cases or related items."
+		example = "toys, bricks, travel, souvenir, display piece"
 	default: // "moderate"
 		guidance = "Suggest close synonyms, alternate names, and the item's general category."
+		example = "toys, bricks, travel"
 	}
 	return fmt.Sprintf(
-		"You are a tagging assistant for a home inventory app. Given an item's details, suggest up to %d short search keywords/tags that would help someone find this item later by typing a related term. %s Do not repeat any of the item's existing keywords. Respond with ONLY a comma-separated list of tags and nothing else — no explanation, no numbering. If you have no useful tags to add, respond with an empty string.",
-		tagCount, guidance,
+		"You are a tagging assistant for a home inventory app. Given an item's details, suggest up to %d short search keywords/tags that help someone find this item later by typing a RELATED term. %s "+
+			"Do not simply repeat words that already appear in the item's name or its existing keywords — those are already searchable. Instead suggest terms the item could ALSO be found by: its category, material, purpose, or theme. "+
+			"For example, for an item named \"London Lego Set\", good tags would be: %s. "+
+			"Respond with ONLY a comma-separated list of tags and nothing else — no explanation, no numbering. If you have no useful tags to add, respond with an empty string.",
+		tagCount, guidance, example,
 	)
 }
 

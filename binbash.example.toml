@@ -1,0 +1,24 @@
+# Copy this file to binbash.toml (in the same directory you run the binary
+# from) and fill in what you want. Every field is optional and falls back to
+# its default if omitted -- except password, which must come from somewhere
+# (this file or BINBASH_PASSWORD) or the app won't start.
+#
+# Any BINBASH_* environment variable overrides its value here, so this file
+# and env vars can be mixed freely -- e.g. keep everything here except the
+# password, and pass that with `docker run -e BINBASH_PASSWORD=...`.
+#
+# To use a file at a different path, point BINBASH_CONFIG at it instead of
+# relying on this default binbash.toml lookup.
+
+port = "8080"
+password = "changeme"
+db_path = "./data/binbash.db"
+auto_backup_dir = ""
+
+[ai]
+# Setting base_url is what turns AI tagging on.
+base_url = ""
+api_key = ""
+model = ""
+tag_count = 3
+tag_breadth = "moderate"

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/thinkscotty/binbash/internal/ai"
 )
@@ -79,7 +80,7 @@ func (h *Handlers) TagItems(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), aiTagBatchTimeout)
 	defer cancel()
 
-	tagged, failed, consecutiveFailures := 0, 0, 0
+	tagged, failed, emptied, skipped, consecutiveFailures := 0, 0, 0, 0, 0
 	timedOut := false
 	for _, it := range untagged {
 		if ctx.Err() != nil {
@@ -103,9 +104,35 @@ func (h *Handlers) TagItems(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
+		if len(tags) == 0 && h.AITagCount > 0 {
+			// A successful call that yielded no usable tags -- typically a
+			// reasoning model that spent its whole token budget thinking and
+			// never emitted the answer (empty content). Leave the item
+			// untagged so it's retried next run instead of being silently
+			// marked done with nothing. (tag_count == 0 is the deliberate
+			// "mark tagged without generating" mode: TagItem returns no tags
+			// by design there, so it's excluded from this check and falls
+			// through to the UPDATE below.)
+			log.Printf("ai tag item %d: response contained no tags", it.id)
+			emptied++
+			consecutiveFailures++
+			if consecutiveFailures >= aiTagConsecutiveFailureLimit {
+				break
+			}
+			continue
+		}
 		consecutiveFailures = 0
 
-		merged := mergeKeywords(it.keywords, tags)
+		// Drop tags that only restate words already in the item's name. The name
+		// is full-text indexed (see the items_fts virtual table), so such tags
+		// widen the item's search surface by nothing -- they're display clutter.
+		// This runs after the empty-response check above, so the item genuinely
+		// got tags back (or tag_count is 0). If the filter removes everything, we
+		// still mark the item done: the model gave a real answer with nothing
+		// worth keeping, and retrying would only reproduce the same echoes.
+		filtered := dropNameEchoes(tags, it.name)
+
+		merged := mergeKeywords(it.keywords, filtered)
 		if _, err := h.DB.Exec(
 			`UPDATE items SET keywords = ?, ai_tagged = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 			merged, it.id,
@@ -114,10 +141,20 @@ func (h *Handlers) TagItems(w http.ResponseWriter, r *http.Request) {
 			failed++
 			continue
 		}
-		tagged++
+		if len(filtered) > 0 {
+			tagged++
+		} else {
+			skipped++
+		}
 	}
 
 	msg := fmt.Sprintf("Tagged %d item(s).", tagged)
+	if skipped > 0 {
+		msg += fmt.Sprintf(" %d had no new tags to add.", skipped)
+	}
+	if emptied > 0 {
+		msg += fmt.Sprintf(" %d returned no tags and will be retried next run.", emptied)
+	}
 	if failed > 0 {
 		msg += fmt.Sprintf(" %d failed — check the server log and try again.", failed)
 	}
@@ -156,4 +193,61 @@ func mergeKeywords(existing string, newTags []string) string {
 		}
 	}
 	return merged
+}
+
+// dropNameEchoes removes AI-suggested tags whose every word already appears in
+// the item's name. binbash full-text indexes the item name (see the items_fts
+// virtual table), so a tag that merely restates name words adds no new way to
+// find the item -- it's redundant clutter. A tag with at least one word not in
+// the name is kept, since that word is a genuinely new search term. Matching is
+// case-insensitive with light plural tolerance ("necklace"/"necklaces"),
+// approximating the porter stemmer the search index uses.
+func dropNameEchoes(tags []string, name string) []string {
+	nameWords := splitWords(name)
+	if len(nameWords) == 0 {
+		return tags
+	}
+	kept := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		if !isNameEcho(tag, nameWords) {
+			kept = append(kept, tag)
+		}
+	}
+	return kept
+}
+
+// isNameEcho reports whether every word in tag already appears in nameWords, so
+// the tag contributes no search term the name doesn't already carry. A tag with
+// no word tokens at all (e.g. punctuation only) is not treated as an echo.
+func isNameEcho(tag string, nameWords []string) bool {
+	tagWords := splitWords(tag)
+	if len(tagWords) == 0 {
+		return false
+	}
+	for _, tw := range tagWords {
+		if !containsWord(nameWords, tw) {
+			return false
+		}
+	}
+	return true
+}
+
+// containsWord reports whether w matches any of words, tolerating a single
+// trailing "s" difference so a plural tag doesn't slip past a singular name
+// word or vice versa. All inputs are already lowercased by splitWords.
+func containsWord(words []string, w string) bool {
+	for _, x := range words {
+		if x == w || x+"s" == w || w+"s" == x {
+			return true
+		}
+	}
+	return false
+}
+
+// splitWords lowercases s and splits it into alphanumeric word tokens,
+// discarding punctuation and whitespace.
+func splitWords(s string) []string {
+	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
 }

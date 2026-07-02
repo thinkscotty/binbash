@@ -245,6 +245,11 @@ button.secondary:hover {
   font-weight: 600;
 }
 
+.item-keywords {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+}
+
 .back-link {
   display: inline-block;
   margin-top: 0.5rem;
