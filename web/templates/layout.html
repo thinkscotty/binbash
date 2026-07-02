@@ -11,12 +11,15 @@
   <header class="site-header">
     <a class="brand" href="/">binbash</a>
     <nav>
+      <a href="/">Search</a>
+      <a href="/items">Items</a>
       <a href="/bins">Bins</a>
     </nav>
   </header>
   <main>
     {{template "content" .}}
   </main>
+  <script src="/static/htmx.min.js"></script>
 </body>
 </html>
 {{end}}
