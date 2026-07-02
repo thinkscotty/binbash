@@ -1,0 +1,41 @@
+{{define "content"}}
+<section class="card">
+  <h1>Backup &amp; restore</h1>
+  {{if .Error}}
+    <p class="error">{{.Error}}</p>
+  {{end}}
+  {{if .Success}}
+    <p class="subtle">{{.Success}}</p>
+  {{end}}
+
+  {{if .LastBackupAt}}
+    <p class="subtle">Last backup: {{.LastBackupAt}}</p>
+  {{else}}
+    <p class="subtle">No backup yet.</p>
+  {{end}}
+  {{if .ReminderDue}}
+    <p class="error">You've added {{.NewItems}} items since your last backup. Consider exporting a fresh copy below.</p>
+  {{end}}
+
+  <h2>Export</h2>
+  <p class="subtle">Download every bin and item as a CSV file you can open in a spreadsheet or keep somewhere safe.</p>
+  <form method="POST" action="/backup/export">
+    <button type="submit">Download CSV backup</button>
+  </form>
+
+  <h2>Import</h2>
+  <p class="subtle">Load items from a binbash CSV export. Items are added to your existing inventory by default; bins are matched by name or created if they don't exist yet.</p>
+  <form method="POST" action="/backup/import" enctype="multipart/form-data">
+    <label for="file">CSV file</label>
+    <input type="file" id="file" name="file" accept=".csv" required>
+    <div class="checkbox-field">
+      <input type="checkbox" id="replace" name="replace">
+      <label for="replace">Replace existing inventory</label>
+    </div>
+    <p class="subtle">If checked, all current bins and items are deleted before the file is loaded. Leave unchecked to add these items alongside what you already have.</p>
+    <button type="submit">Import CSV</button>
+  </form>
+
+  <a class="back-link" href="/">&larr; Back to search</a>
+</section>
+{{end}}

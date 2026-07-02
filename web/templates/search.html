@@ -28,12 +28,17 @@
     {{end}}
   </div>
 
+  {{if .ReminderDue}}
+    <p class="subtle">You've added {{.NewItems}} items since your last backup. <a href="/backup">Back up now</a>.</p>
+  {{end}}
+
   <dl class="stats">
     <div><dt>Bins</dt><dd>{{.BinCount}}</dd></div>
     <div><dt>Items</dt><dd>{{.ItemCount}}</dd></div>
   </dl>
   <a class="button-link" href="/items">Add items</a>
   <a class="button-link" href="/bins">Manage bins</a>
+  <a class="back-link" href="/backup">Backup &amp; restore</a>
   <a class="back-link" href="/account">Change password</a>
   <form method="POST" action="/logout">
     <button type="submit" class="secondary">Sign out</button>

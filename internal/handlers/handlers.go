@@ -17,13 +17,14 @@ import (
 type Templates map[string]*template.Template
 
 type Handlers struct {
-	DB        *sql.DB
-	Auth      *auth.Auth
-	Templates Templates
+	DB            *sql.DB
+	Auth          *auth.Auth
+	Templates     Templates
+	AutoBackupDir string
 }
 
-func New(db *sql.DB, a *auth.Auth, templates Templates) *Handlers {
-	return &Handlers{DB: db, Auth: a, Templates: templates}
+func New(db *sql.DB, a *auth.Auth, templates Templates, autoBackupDir string) *Handlers {
+	return &Handlers{DB: db, Auth: a, Templates: templates, AutoBackupDir: autoBackupDir}
 }
 
 func (h *Handlers) render(w http.ResponseWriter, page string, data any) {

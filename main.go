@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/thinkscotty/binbash/internal/auth"
 	"github.com/thinkscotty/binbash/internal/config"
@@ -20,7 +21,7 @@ var templatesFS embed.FS
 var staticFS embed.FS
 
 // pages lists every content template that gets rendered inside the shared layout.
-var pages = []string{"login.html", "search.html", "bins.html", "bin_edit.html", "items.html", "item_edit.html", "account.html"}
+var pages = []string{"login.html", "search.html", "bins.html", "bin_edit.html", "items.html", "item_edit.html", "account.html", "backup.html"}
 
 func loadTemplates() (handlers.Templates, error) {
 	templates := make(handlers.Templates, len(pages))
@@ -46,6 +47,12 @@ func main() {
 	}
 	defer database.Close()
 
+	if cfg.AutoBackupDir != "" {
+		if err := os.MkdirAll(cfg.AutoBackupDir, 0o755); err != nil {
+			log.Fatalf("auto-backup directory: %v", err)
+		}
+	}
+
 	templates, err := loadTemplates()
 	if err != nil {
 		log.Fatalf("templates: %v", err)
@@ -55,7 +62,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("auth: %v", err)
 	}
-	h := handlers.New(database, a, templates)
+	h := handlers.New(database, a, templates, cfg.AutoBackupDir)
 
 	static, err := fs.Sub(staticFS, "web/static")
 	if err != nil {
@@ -68,6 +75,9 @@ func main() {
 	mux.HandleFunc("POST /logout", h.LogoutSubmit)
 	mux.HandleFunc("GET /account", h.AccountPage)
 	mux.HandleFunc("POST /account/password", h.ChangePassword)
+	mux.HandleFunc("GET /backup", h.BackupPage)
+	mux.HandleFunc("POST /backup/export", h.ExportBackup)
+	mux.HandleFunc("POST /backup/import", h.ImportBackup)
 	mux.HandleFunc("GET /{$}", h.Search)
 	mux.HandleFunc("GET /bins", h.ListBins)
 	mux.HandleFunc("POST /bins", h.CreateBin)

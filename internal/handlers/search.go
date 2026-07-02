@@ -52,12 +52,16 @@ func (h *Handlers) Search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	newItems, _ := h.checkAndRunAutoBackup()
+
 	h.render(w, "search.html", map[string]any{
-		"BinCount":  binCount,
-		"ItemCount": itemCount,
-		"Query":     query,
-		"Searched":  query != "",
-		"Items":     items,
+		"BinCount":    binCount,
+		"ItemCount":   itemCount,
+		"Query":       query,
+		"Searched":    query != "",
+		"Items":       items,
+		"NewItems":    newItems,
+		"ReminderDue": newItems >= autoBackupItemThreshold,
 	})
 }
 

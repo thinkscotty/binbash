@@ -7,22 +7,24 @@ import (
 )
 
 type Config struct {
-	Port      string
-	Password  string
-	DBPath    string
-	AIBaseURL string
-	AIAPIKey  string
-	AIModel   string
+	Port          string
+	Password      string
+	DBPath        string
+	AIBaseURL     string
+	AIAPIKey      string
+	AIModel       string
+	AutoBackupDir string
 }
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		Port:      getEnv("BINBASH_PORT", "8080"),
-		Password:  os.Getenv("BINBASH_PASSWORD"),
-		DBPath:    getEnv("BINBASH_DB_PATH", "./data/binbash.db"),
-		AIBaseURL: os.Getenv("BINBASH_AI_BASE_URL"),
-		AIAPIKey:  os.Getenv("BINBASH_AI_API_KEY"),
-		AIModel:   os.Getenv("BINBASH_AI_MODEL"),
+		Port:          getEnv("BINBASH_PORT", "8080"),
+		Password:      os.Getenv("BINBASH_PASSWORD"),
+		DBPath:        getEnv("BINBASH_DB_PATH", "./data/binbash.db"),
+		AIBaseURL:     os.Getenv("BINBASH_AI_BASE_URL"),
+		AIAPIKey:      os.Getenv("BINBASH_AI_API_KEY"),
+		AIModel:       os.Getenv("BINBASH_AI_MODEL"),
+		AutoBackupDir: os.Getenv("BINBASH_AUTO_BACKUP_DIR"),
 	}
 
 	if cfg.Password == "" {

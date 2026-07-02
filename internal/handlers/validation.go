@@ -69,6 +69,31 @@ func validateItem(name, description, keywords string, binID int64, binErr error)
 	return ""
 }
 
+// validateImportRow returns a human-friendly error message for a single CSV
+// import row, or "" if the row is acceptable. Callers are expected to pass
+// already-trimmed values.
+func validateImportRow(itemName, itemDescription, keywords, binName, binCategory, binDescription string) string {
+	switch {
+	case itemName == "":
+		return "item_name is required"
+	case binName == "":
+		return "bin_name is required"
+	case tooLong(itemName, maxNameLen):
+		return fmt.Sprintf("item_name is too long (max %d characters)", maxNameLen)
+	case tooLong(binName, maxNameLen):
+		return fmt.Sprintf("bin_name is too long (max %d characters)", maxNameLen)
+	case tooLong(itemDescription, maxDescriptionLen):
+		return fmt.Sprintf("item_description is too long (max %d characters)", maxDescriptionLen)
+	case tooLong(binDescription, maxDescriptionLen):
+		return fmt.Sprintf("bin_description is too long (max %d characters)", maxDescriptionLen)
+	case tooLong(keywords, maxKeywordsLen):
+		return fmt.Sprintf("keywords are too long (max %d characters)", maxKeywordsLen)
+	case tooLong(binCategory, maxCategoryLen):
+		return fmt.Sprintf("bin_category is too long (max %d characters)", maxCategoryLen)
+	}
+	return ""
+}
+
 // validatePasswordChange returns a human-friendly error message for a
 // password-change submission, or "" if the input is acceptable. currentOK
 // reports whether the submitted current password matched.
