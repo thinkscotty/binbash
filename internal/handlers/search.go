@@ -52,7 +52,17 @@ func (h *Handlers) Search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	newItems, _ := h.checkAndRunAutoBackup()
+	// search.html's search box re-fires this handler on every keystroke via
+	// htmx (HX-Request: true), debounced but still far more often than a real
+	// page load. The auto-backup check costs extra DB round trips and, right
+	// when the threshold is crossed, a synchronous CSV write -- skip it for
+	// those partial requests, where the result isn't even visible anyway
+	// (hx-select="#results" discards everything outside that div). It still
+	// runs on every real navigation to "/".
+	var newItems int
+	if r.Header.Get("HX-Request") != "true" {
+		newItems, _ = h.checkAndRunAutoBackup()
+	}
 
 	h.render(w, "search.html", map[string]any{
 		"BinCount":    binCount,

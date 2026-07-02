@@ -1,3 +1,10 @@
+{{define "navlinks"}}
+  <a href="/" class="{{if eq .CurrentPage "search"}}active{{end}}">Search</a>
+  <a href="/items" class="{{if eq .CurrentPage "items"}}active{{end}}">Items</a>
+  <a href="/bins" class="{{if eq .CurrentPage "bins"}}active{{end}}">Bins</a>
+  <a href="/backup" class="{{if eq .CurrentPage "backup"}}active{{end}}">Backup</a>
+  <a href="/account" class="{{if eq .CurrentPage "account"}}active{{end}}">Account</a>
+{{end}}
 {{define "layout"}}
 <!DOCTYPE html>
 <html lang="en">
@@ -10,16 +17,16 @@
 <body>
   <header class="site-header">
     <a class="brand" href="/">binbash</a>
-    <nav>
-      <a href="/">Search</a>
-      <a href="/items">Items</a>
-      <a href="/bins">Bins</a>
-      <a href="/backup">Backup</a>
-    </nav>
+    {{if ne .CurrentPage "login"}}
+    <nav class="top-nav">{{template "navlinks" .}}</nav>
+    {{end}}
   </header>
   <main>
     {{template "content" .}}
   </main>
+  {{if ne .CurrentPage "login"}}
+  <nav class="tab-bar">{{template "navlinks" .}}</nav>
+  {{end}}
   <script src="/static/htmx.min.js"></script>
 </body>
 </html>

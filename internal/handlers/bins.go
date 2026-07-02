@@ -2,11 +2,30 @@ package handlers
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"modernc.org/sqlite"
 )
+
+// sqliteConstraintUniqueCode is SQLite's stable, documented extended result
+// code for a UNIQUE constraint violation (SQLITE_CONSTRAINT_UNIQUE). The
+// modernc.org/sqlite driver's Error.Code() returns the extended code here,
+// not the coarser primary SQLITE_CONSTRAINT (19).
+const sqliteConstraintUniqueCode = 2067
+
+// isDuplicateNameErr reports whether err is the idx_bins_name UNIQUE index
+// being tripped. It's the only constraint an INSERT/UPDATE on bins can
+// violate, so this match is unambiguous here. This catches the race the
+// binNameTaken pre-check can't: two concurrent requests can both pass that
+// check before either writes, so the write itself has to be the final word.
+func isDuplicateNameErr(err error) bool {
+	var sqliteErr *sqlite.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteConstraintUniqueCode
+}
 
 type Bin struct {
 	ID          int64
@@ -58,6 +77,15 @@ func (h *Handlers) CreateBin(w http.ResponseWriter, r *http.Request) {
 		`INSERT INTO bins (name, description, category) VALUES (?, ?, ?)`,
 		name, description, category,
 	); err != nil {
+		if isDuplicateNameErr(err) {
+			h.renderBins(w, map[string]any{
+				"Error":       fmt.Sprintf("A bin named %q already exists.", name),
+				"Name":        name,
+				"Description": description,
+				"Category":    category,
+			})
+			return
+		}
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -126,6 +154,13 @@ func (h *Handlers) UpdateBin(w http.ResponseWriter, r *http.Request) {
 		name, description, category, id,
 	)
 	if err != nil {
+		if isDuplicateNameErr(err) {
+			h.render(w, "bin_edit.html", map[string]any{
+				"Error": fmt.Sprintf("A bin named %q already exists.", name),
+				"Bin":   Bin{ID: id, Name: name, Description: description, Category: category},
+			})
+			return
+		}
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

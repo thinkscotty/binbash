@@ -5,6 +5,7 @@
 *.db-wal
 .env
 /binbash
+/dist/
 
 # Planning/reference docs kept local-only, not published to GitHub
 /PLAN.md

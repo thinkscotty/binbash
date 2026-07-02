@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/thinkscotty/binbash/internal/ai"
 	"github.com/thinkscotty/binbash/internal/auth"
@@ -23,6 +25,19 @@ var staticFS embed.FS
 
 // pages lists every content template that gets rendered inside the shared layout.
 var pages = []string{"login.html", "search.html", "bins.html", "bin_edit.html", "items.html", "item_edit.html", "account.html", "backup.html"}
+
+// noDirListing wraps a handler (typically an http.FileServer) so that
+// directory-style requests 404 instead of rendering an auto-generated file
+// listing, which http.FileServer has no built-in way to suppress.
+func noDirListing(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
 
 func loadTemplates() (handlers.Templates, error) {
 	templates := make(handlers.Templates, len(pages))
@@ -94,11 +109,22 @@ func main() {
 	mux.HandleFunc("GET /items/{id}/edit", h.EditItemForm)
 	mux.HandleFunc("POST /items/{id}", h.UpdateItem)
 	mux.HandleFunc("POST /items/tag", h.TagItems)
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
+	mux.Handle("GET /static/", noDirListing(http.StripPrefix("/static/", http.FileServer(http.FS(static)))))
 
 	addr := ":" + cfg.Port
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: a.Middleware(mux),
+		// ReadHeaderTimeout and IdleTimeout guard against slow-client connection
+		// exhaustion (Slowloris-style). WriteTimeout is deliberately left unset:
+		// it would also bound total handler runtime, and AI batch-tagging can
+		// legitimately take several minutes against a slow provider.
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	log.Printf("binbash listening on %s", addr)
-	if err := http.ListenAndServe(addr, a.Middleware(mux)); err != nil {
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }

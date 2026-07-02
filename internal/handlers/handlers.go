@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/thinkscotty/binbash/internal/ai"
@@ -34,6 +35,13 @@ type Handlers struct {
 	// the search page at once) can all read the same stale backup watermark
 	// and race to write the same timestamped auto-backup file.
 	backupMu sync.Mutex
+
+	// aiTagMu serializes TagItems: it selects a batch of untagged items and
+	// then commits them one at a time over the course of the request, so
+	// without this lock, two concurrent invocations (a double-click, two open
+	// tabs) could both select the same "untagged" items before either commits
+	// and pay for duplicate AI calls on the same items.
+	aiTagMu sync.Mutex
 }
 
 func New(db *sql.DB, a *auth.Auth, templates Templates, autoBackupDir string, aiClient *ai.Client, aiTagCount int, aiTagBreadth string) *Handlers {
@@ -50,6 +58,16 @@ func (h *Handlers) render(w http.ResponseWriter, page string, data any) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+
+	// Every call site passes either nil or a map[string]any, so this always
+	// succeeds in practice; it lets layout.html know which nav link is active
+	// without every handler having to set it individually.
+	m, ok := data.(map[string]any)
+	if !ok {
+		m = map[string]any{}
+	}
+	m["CurrentPage"] = strings.TrimSuffix(page, ".html")
+	data = m
 
 	// Render into a buffer first so a template error becomes a clean 500 rather
 	// than a half-written page whose 200 status has already been committed.

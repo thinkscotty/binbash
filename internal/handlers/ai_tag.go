@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/thinkscotty/binbash/internal/ai"
 )
@@ -12,6 +14,13 @@ import (
 const (
 	aiTagBatchSize               = 25
 	aiTagConsecutiveFailureLimit = 3
+
+	// aiTagBatchTimeout bounds the whole batch's wall-clock time, comfortably
+	// under common reverse-proxy read-timeout defaults (e.g. nginx's 60s), so
+	// a slow-but-successful provider can't hold the request open for the
+	// worst-case 25 * 30s-per-item duration. Items past the cutoff are simply
+	// left untagged for the next click, same as any other stopping point.
+	aiTagBatchTimeout = 45 * time.Second
 )
 
 type untaggedItem struct {
@@ -32,6 +41,12 @@ func (h *Handlers) TagItems(w http.ResponseWriter, r *http.Request) {
 		h.renderItems(w, map[string]any{"Error": "AI tagging isn't configured."})
 		return
 	}
+
+	if !h.aiTagMu.TryLock() {
+		h.renderItems(w, map[string]any{"Error": "Tagging is already running — give it a moment and try again."})
+		return
+	}
+	defer h.aiTagMu.Unlock()
 
 	rows, err := h.DB.Query(`
 		SELECT items.id, items.name, COALESCE(items.description, ''), COALESCE(items.keywords, ''),
@@ -61,9 +76,17 @@ func (h *Handlers) TagItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx, cancel := context.WithTimeout(r.Context(), aiTagBatchTimeout)
+	defer cancel()
+
 	tagged, failed, consecutiveFailures := 0, 0, 0
+	timedOut := false
 	for _, it := range untagged {
-		tags, err := h.AI.TagItem(r.Context(), ai.ItemContext{
+		if ctx.Err() != nil {
+			timedOut = true
+			break
+		}
+		tags, err := h.AI.TagItem(ctx, ai.ItemContext{
 			Name:             it.name,
 			Description:      it.description,
 			ExistingKeywords: it.keywords,
@@ -97,6 +120,9 @@ func (h *Handlers) TagItems(w http.ResponseWriter, r *http.Request) {
 	msg := fmt.Sprintf("Tagged %d item(s).", tagged)
 	if failed > 0 {
 		msg += fmt.Sprintf(" %d failed — check the server log and try again.", failed)
+	}
+	if timedOut {
+		msg += " Stopped early to keep this page responsive — click the button again to keep going."
 	}
 	h.renderItems(w, map[string]any{"Success": msg})
 }

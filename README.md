@@ -47,6 +47,46 @@ go build -o binbash .
 
 Produces a single static binary with no runtime dependencies.
 
+## Deployment
+
+binbash is a single static binary — no runtime dependencies, no separate database process to run. A few ways to run it in production:
+
+### Prebuilt binary
+
+Grab a binary for your platform from the [Releases page](https://github.com/thinkscotty/binbash/releases) (Linux amd64/arm64, macOS, Windows), or build it yourself per [Building](#building) above. Run it directly, or under a process supervisor — see the systemd example below.
+
+### systemd (Linux)
+
+A sample unit file is at [`deploy/binbash.service`](deploy/binbash.service). Typical setup:
+
+```sh
+sudo useradd -r -s /usr/sbin/nologin binbash
+sudo mkdir -p /opt/binbash
+sudo cp binbash /opt/binbash/
+sudo cp deploy/binbash.service /etc/systemd/system/
+echo "BINBASH_PASSWORD=changeme" | sudo tee /opt/binbash/.env
+sudo chown -R binbash:binbash /opt/binbash
+sudo systemctl enable --now binbash
+```
+
+### Docker
+
+```sh
+docker build -t binbash .
+docker run -d \
+  --name binbash \
+  -p 8080:8080 \
+  -e BINBASH_PASSWORD=changeme \
+  -v ./data:/data \
+  binbash
+```
+
+The image is a convenience wrapper around the same binary, not the primary deployment path. Mount `/data` to persist the SQLite database (and any auto-backups, if `BINBASH_AUTO_BACKUP_DIR` is also set to somewhere under `/data`).
+
+### Put a reverse proxy in front
+
+binbash only speaks plain HTTP and is protected by a single shared password — **don't expose it directly to the internet**. Put a reverse proxy (Caddy, nginx, Traefik) in front to terminate HTTPS, or keep it on a private/VPN-only network. Without HTTPS, the login password travels in plaintext.
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE).

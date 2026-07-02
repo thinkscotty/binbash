@@ -1,0 +1,13 @@
+[Unit]
+Description=binbash home inventory
+After=network.target
+
+[Service]
+ExecStart=/opt/binbash/binbash
+WorkingDirectory=/opt/binbash
+EnvironmentFile=/opt/binbash/.env
+Restart=on-failure
+User=binbash
+
+[Install]
+WantedBy=multi-user.target

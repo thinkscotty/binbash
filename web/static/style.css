@@ -1,12 +1,12 @@
 :root {
-  --color-bg: #fdf6ec;
-  --color-surface: #ffffff;
-  --color-text: #3a2e26;
-  --color-subtle: #8a7a6d;
-  --color-accent: #d97a3f;
-  --color-accent-dark: #b8622e;
-  --color-border: #ecdfcf;
-  --color-error: #b3453b;
+  --color-bg: #2e3440;
+  --color-surface: #3b4252;
+  --color-text: #eceff4;
+  --color-subtle: #d8dee9;
+  --color-accent: #88c0d0;
+  --color-accent-dark: #81a1c1;
+  --color-border: #4c566a;
+  --color-error: #e58c94;
   --radius: 12px;
   --spacing: 1rem;
 }
@@ -39,20 +39,69 @@ body {
   text-decoration: none;
 }
 
-.site-header nav a {
-  color: var(--color-subtle);
+.top-nav {
+  display: none;
+}
+
+.top-nav a,
+.tab-bar a {
   text-decoration: none;
   font-weight: 600;
 }
 
-.site-header nav a:hover {
+.top-nav a {
+  color: var(--color-subtle);
+}
+
+.top-nav a:hover,
+.top-nav a.active {
   color: var(--color-accent-dark);
+}
+
+.tab-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  padding-bottom: env(safe-area-inset-bottom);
+  z-index: 10;
+}
+
+.tab-bar a {
+  flex: 1;
+  text-align: center;
+  padding: 0.6rem 0.25rem;
+  font-size: 0.75rem;
+  color: var(--color-subtle);
+}
+
+.tab-bar a.active {
+  color: var(--color-accent);
 }
 
 main {
   padding: var(--spacing);
+  padding-bottom: calc(var(--spacing) + 4.5rem);
   max-width: 32rem;
   margin: 0 auto;
+}
+
+@media (min-width: 640px) {
+  .top-nav {
+    display: flex;
+    gap: 1rem;
+  }
+
+  .tab-bar {
+    display: none;
+  }
+
+  main {
+    padding-bottom: var(--spacing);
+  }
 }
 
 .card {
@@ -114,7 +163,7 @@ button {
   border: none;
   border-radius: 8px;
   background: var(--color-accent);
-  color: white;
+  color: var(--color-bg);
   font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
@@ -140,7 +189,7 @@ button.secondary:hover {
   padding: 0.75rem;
   border-radius: 8px;
   background: var(--color-accent);
-  color: white;
+  color: var(--color-bg);
   font-weight: 600;
   text-decoration: none;
   margin-bottom: 1rem;
