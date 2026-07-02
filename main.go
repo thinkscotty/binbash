@@ -20,7 +20,7 @@ var templatesFS embed.FS
 var staticFS embed.FS
 
 // pages lists every content template that gets rendered inside the shared layout.
-var pages = []string{"login.html", "search.html", "bins.html", "bin_edit.html", "items.html", "item_edit.html"}
+var pages = []string{"login.html", "search.html", "bins.html", "bin_edit.html", "items.html", "item_edit.html", "account.html"}
 
 func loadTemplates() (handlers.Templates, error) {
 	templates := make(handlers.Templates, len(pages))
@@ -51,7 +51,10 @@ func main() {
 		log.Fatalf("templates: %v", err)
 	}
 
-	a := auth.New(cfg.Password)
+	a, err := auth.New(database, cfg.Password)
+	if err != nil {
+		log.Fatalf("auth: %v", err)
+	}
 	h := handlers.New(database, a, templates)
 
 	static, err := fs.Sub(staticFS, "web/static")
@@ -63,6 +66,8 @@ func main() {
 	mux.HandleFunc("GET /login", h.LoginPage)
 	mux.HandleFunc("POST /login", h.LoginSubmit)
 	mux.HandleFunc("POST /logout", h.LogoutSubmit)
+	mux.HandleFunc("GET /account", h.AccountPage)
+	mux.HandleFunc("POST /account/password", h.ChangePassword)
 	mux.HandleFunc("GET /{$}", h.Search)
 	mux.HandleFunc("GET /bins", h.ListBins)
 	mux.HandleFunc("POST /bins", h.CreateBin)

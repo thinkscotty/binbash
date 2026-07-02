@@ -22,7 +22,7 @@ All configuration is via environment variables:
 | Var | Default | Purpose |
 |---|---|---|
 | `BINBASH_PORT` | `8080` | HTTP listen port |
-| `BINBASH_PASSWORD` | *(required)* | Login password |
+| `BINBASH_PASSWORD` | *(required)* | Initial login password, used to bootstrap the account on first run. Change it in-app via "Change password" afterward — the database, not this variable, is the source of truth from then on. |
 | `BINBASH_DB_PATH` | `./data/binbash.db` | SQLite file location |
 | `BINBASH_AI_BASE_URL` | *(unset = AI tagging disabled)* | OpenAI-compatible endpoint |
 | `BINBASH_AI_API_KEY` | *(unset)* | API key for the AI endpoint |

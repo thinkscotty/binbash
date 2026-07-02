@@ -15,6 +15,8 @@ const (
 	maxDescriptionLen = 2000
 	maxKeywordsLen    = 500
 	maxSearchLen      = 200
+	minPasswordLen    = 8
+	maxPasswordLen    = 72 // bcrypt's hard limit, in bytes
 )
 
 // tooLong reports whether s exceeds max runes.
@@ -63,6 +65,25 @@ func validateItem(name, description, keywords string, binID int64, binErr error)
 		return fmt.Sprintf("Description is too long (max %d characters)", maxDescriptionLen)
 	case tooLong(keywords, maxKeywordsLen):
 		return fmt.Sprintf("Keywords are too long (max %d characters)", maxKeywordsLen)
+	}
+	return ""
+}
+
+// validatePasswordChange returns a human-friendly error message for a
+// password-change submission, or "" if the input is acceptable. currentOK
+// reports whether the submitted current password matched.
+func validatePasswordChange(currentOK bool, newPassword, confirm string) string {
+	switch {
+	case !currentOK:
+		return "Current password is incorrect"
+	case newPassword == "":
+		return "New password is required"
+	case len(newPassword) < minPasswordLen:
+		return fmt.Sprintf("New password must be at least %d characters", minPasswordLen)
+	case len(newPassword) > maxPasswordLen:
+		return fmt.Sprintf("New password is too long (max %d characters)", maxPasswordLen)
+	case newPassword != confirm:
+		return "New password and confirmation don't match"
 	}
 	return ""
 }
