@@ -28,9 +28,9 @@ func (h *Handlers) CreateBin(w http.ResponseWriter, r *http.Request) {
 	description := strings.TrimSpace(r.FormValue("description"))
 	category := strings.TrimSpace(r.FormValue("category"))
 
-	if name == "" {
+	if formErr := validateBin(name, category, description); formErr != "" {
 		h.renderBins(w, map[string]any{
-			"Error":       "Bin name is required",
+			"Error":       formErr,
 			"Name":        name,
 			"Description": description,
 			"Category":    category,
@@ -84,23 +84,35 @@ func (h *Handlers) UpdateBin(w http.ResponseWriter, r *http.Request) {
 	description := strings.TrimSpace(r.FormValue("description"))
 	category := strings.TrimSpace(r.FormValue("category"))
 
-	if name == "" {
+	if formErr := validateBin(name, category, description); formErr != "" {
 		h.render(w, "bin_edit.html", map[string]any{
-			"Error": "Bin name is required",
+			"Error": formErr,
 			"Bin":   Bin{ID: id, Name: name, Description: description, Category: category},
 		})
 		return
 	}
 
-	if _, err := h.DB.Exec(
+	res, err := h.DB.Exec(
 		`UPDATE bins SET name = ?, description = ?, category = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 		name, description, category, id,
-	); err != nil {
+	)
+	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		http.NotFound(w, r)
 		return
 	}
 
 	http.Redirect(w, r, "/bins", http.StatusSeeOther)
+}
+
+// binExists reports whether a bin with the given id is present.
+func (h *Handlers) binExists(id int64) (bool, error) {
+	var n int
+	err := h.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM bins WHERE id = ?)`, id).Scan(&n)
+	return n == 1, err
 }
 
 func (h *Handlers) loadBin(id int64) (Bin, error) {
@@ -112,23 +124,8 @@ func (h *Handlers) loadBin(id int64) (Bin, error) {
 }
 
 func (h *Handlers) renderBins(w http.ResponseWriter, data map[string]any) {
-	rows, err := h.DB.Query(`SELECT id, name, COALESCE(description, ''), COALESCE(category, '') FROM bins ORDER BY name`)
+	bins, err := h.loadBins()
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	var bins []Bin
-	for rows.Next() {
-		var b Bin
-		if err := rows.Scan(&b.ID, &b.Name, &b.Description, &b.Category); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		bins = append(bins, b)
-	}
-	if err := rows.Err(); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -138,4 +135,22 @@ func (h *Handlers) renderBins(w http.ResponseWriter, data map[string]any) {
 	}
 	data["Bins"] = bins
 	h.render(w, "bins.html", data)
+}
+
+func (h *Handlers) loadBins() ([]Bin, error) {
+	rows, err := h.DB.Query(`SELECT id, name, COALESCE(description, ''), COALESCE(category, '') FROM bins ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var bins []Bin
+	for rows.Next() {
+		var b Bin
+		if err := rows.Scan(&b.ID, &b.Name, &b.Description, &b.Category); err != nil {
+			return nil, err
+		}
+		bins = append(bins, b)
+	}
+	return bins, rows.Err()
 }

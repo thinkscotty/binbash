@@ -1,0 +1,49 @@
+{{define "content"}}
+<section class="card">
+  <h1>Add item</h1>
+  {{if .Error}}
+    <p class="error">{{.Error}}</p>
+  {{end}}
+  {{if .Bins}}
+  <form method="POST" action="/items">
+    <label for="name">Item name</label>
+    <input type="text" id="name" name="name" value="{{.Name}}" maxlength="200" autofocus required>
+    <label for="bin_id">Bin</label>
+    <select id="bin_id" name="bin_id" required>
+      {{$selected := .SelectedBinID}}
+      {{range .Bins}}
+        <option value="{{.ID}}" {{if eq .ID $selected}}selected{{end}}>{{.Name}}</option>
+      {{end}}
+    </select>
+    <label for="description">Description <span class="subtle">(optional)</span></label>
+    <textarea id="description" name="description" rows="2" maxlength="2000">{{.Description}}</textarea>
+    <label for="keywords">Keywords <span class="subtle">(optional)</span></label>
+    <input type="text" id="keywords" name="keywords" value="{{.Keywords}}" maxlength="500">
+    <button type="submit">Add item</button>
+  </form>
+  {{else}}
+    <p class="subtle">You need a bin before you can add items.</p>
+    <a class="button-link" href="/bins">Create a bin</a>
+  {{end}}
+</section>
+
+<section class="card">
+  <h2>Recent items</h2>
+  {{if .Items}}
+    <ul class="bin-list">
+      {{range .Items}}
+        <li class="bin-row">
+          <div>
+            <strong>{{.Name}}</strong>
+            <span class="badge">{{.BinName}}</span>
+            {{if .Description}}<p class="subtle">{{.Description}}</p>{{end}}
+          </div>
+          <a href="/items/{{.ID}}/edit">Edit</a>
+        </li>
+      {{end}}
+    </ul>
+  {{else}}
+    <p class="subtle">No items yet — add your first one above.</p>
+  {{end}}
+</section>
+{{end}}

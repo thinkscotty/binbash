@@ -7,11 +7,11 @@
   {{end}}
   <form method="POST" action="/bins">
     <label for="name">Name</label>
-    <input type="text" id="name" name="name" value="{{.Name}}" autofocus required>
+    <input type="text" id="name" name="name" value="{{.Name}}" maxlength="200" autofocus required>
     <label for="category">Category <span class="subtle">(optional)</span></label>
-    <input type="text" id="category" name="category" value="{{.Category}}">
+    <input type="text" id="category" name="category" value="{{.Category}}" maxlength="100">
     <label for="description">Description <span class="subtle">(optional)</span></label>
-    <textarea id="description" name="description" rows="2">{{.Description}}</textarea>
+    <textarea id="description" name="description" rows="2" maxlength="2000">{{.Description}}</textarea>
     <button type="submit">Add bin</button>
   </form>
 </section>

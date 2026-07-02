@@ -1,0 +1,25 @@
+{{define "content"}}
+<section class="card">
+  <h1>Edit item</h1>
+  {{if .Error}}
+    <p class="error">{{.Error}}</p>
+  {{end}}
+  <form method="POST" action="/items/{{.Item.ID}}">
+    <label for="name">Item name</label>
+    <input type="text" id="name" name="name" value="{{.Item.Name}}" maxlength="200" autofocus required>
+    <label for="bin_id">Bin</label>
+    <select id="bin_id" name="bin_id" required>
+      {{$selected := .Item.BinID}}
+      {{range .Bins}}
+        <option value="{{.ID}}" {{if eq .ID $selected}}selected{{end}}>{{.Name}}</option>
+      {{end}}
+    </select>
+    <label for="description">Description <span class="subtle">(optional)</span></label>
+    <textarea id="description" name="description" rows="2" maxlength="2000">{{.Item.Description}}</textarea>
+    <label for="keywords">Keywords <span class="subtle">(optional)</span></label>
+    <input type="text" id="keywords" name="keywords" value="{{.Item.Keywords}}" maxlength="500">
+    <button type="submit">Save changes</button>
+  </form>
+  <a class="back-link" href="/items">&larr; Back to items</a>
+</section>
+{{end}}

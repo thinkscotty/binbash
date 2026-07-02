@@ -25,17 +25,29 @@ func Open(path string) (*sql.DB, error) {
 		}
 	}
 
-	database, err := sql.Open("sqlite", path)
+	// Pragmas are applied through the DSN so that *every* pooled connection gets
+	// them. foreign_keys and busy_timeout are per-connection settings, so running
+	// them once via database.Exec would only configure a single connection in the
+	// pool and leave the rest unprotected.
+	//   - busy_timeout(5000): wait up to 5s for a lock instead of failing outright
+	//                         with SQLITE_BUSY ("database is locked").
+	//   - foreign_keys(1):    enforce the items -> bins relationship.
+	//   - journal_mode(WAL):  let readers proceed alongside a writer; persisted in
+	//                         the database file, so it only needs setting once.
+	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
+
+	database, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
+	// SQLite allows only one writer at a time. Funneling all access through a
+	// single connection eliminates internal write contention entirely, which is
+	// well within the performance envelope of a self-hosted home inventory app.
+	database.SetMaxOpenConns(1)
+
 	if err := database.Ping(); err != nil {
 		return nil, fmt.Errorf("ping database: %w", err)
-	}
-
-	if _, err := database.Exec(`PRAGMA foreign_keys = ON`); err != nil {
-		return nil, fmt.Errorf("enable foreign keys: %w", err)
 	}
 
 	if err := migrate(database); err != nil {
