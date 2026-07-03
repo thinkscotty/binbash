@@ -5,7 +5,11 @@ After=network.target
 [Service]
 ExecStart=/opt/binbash/binbash
 WorkingDirectory=/opt/binbash
-EnvironmentFile=/opt/binbash/.env
+# Configuration is read from /opt/binbash/binbash.toml (found automatically
+# because WorkingDirectory is /opt/binbash). This optional .env is only for
+# overriding individual settings with BINBASH_* env vars; the leading '-'
+# lets the unit start fine when the file is absent.
+EnvironmentFile=-/opt/binbash/.env
 Restart=on-failure
 User=binbash
 

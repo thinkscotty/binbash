@@ -39,9 +39,10 @@ jobs:
           name="binbash-${VERSION}-${GOOS}-${GOARCH}"
           bin="binbash"
           [ "$GOOS" = "windows" ] && bin="binbash.exe"
-          mkdir -p "stage/${name}" dist
+          mkdir -p "stage/${name}/deploy" dist
           go build -trimpath -ldflags="-s -w" -o "stage/${name}/${bin}" .
-          cp LICENSE "stage/${name}/"
+          cp LICENSE README.md binbash.example.toml "stage/${name}/"
+          cp deploy/binbash.service "stage/${name}/deploy/"
           if [ "$GOOS" = "windows" ]; then
             (cd stage && zip -qr "../dist/${name}.zip" "${name}")
           else
