@@ -56,7 +56,10 @@
             {{if .Description}}<p class="subtle">{{.Description}}</p>{{end}}
             {{if .Keywords}}<p class="item-keywords"><span class="subtle">Keywords:</span> {{.Keywords}}</p>{{end}}
           </div>
-          <a href="/items/{{.ID}}/edit">Edit</a>
+          <div class="row-actions">
+            <a href="/items/{{.ID}}/edit">Edit</a>
+            <a class="delete" href="/items/{{.ID}}/delete">Delete</a>
+          </div>
         </li>
       {{end}}
     </ul>

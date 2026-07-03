@@ -27,7 +27,10 @@
             {{if .Category}}<span class="badge">{{.Category}}</span>{{end}}
             {{if .Description}}<p class="subtle">{{.Description}}</p>{{end}}
           </div>
-          <a href="/bins/{{.ID}}/edit">Edit</a>
+          <div class="row-actions">
+            <a href="/bins/{{.ID}}/edit">Edit</a>
+            <a class="delete" href="/bins/{{.ID}}/delete">Delete</a>
+          </div>
         </li>
       {{end}}
     </ul>

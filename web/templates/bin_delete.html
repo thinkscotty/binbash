@@ -1,0 +1,17 @@
+{{define "content"}}
+<section class="card">
+  <h1>Delete bin</h1>
+  <p>Are you sure you want to delete <strong>{{.Bin.Name}}</strong>?</p>
+  {{if gt .ItemCount 0}}
+    <p class="error">This bin contains {{.ItemCount}} item{{if ne .ItemCount 1}}s{{end}}.
+       Deleting the bin will permanently delete {{if eq .ItemCount 1}}it{{else}}them{{end}} too.</p>
+  {{end}}
+  <p class="subtle">This can't be undone.</p>
+  <form method="POST" action="/bins/{{.Bin.ID}}/delete">
+    <button type="submit" class="danger">
+      {{if gt .ItemCount 0}}Delete bin and {{.ItemCount}} item{{if ne .ItemCount 1}}s{{end}}{{else}}Delete bin{{end}}
+    </button>
+  </form>
+  <a class="back-link" href="/bins">&larr; Cancel</a>
+</section>
+{{end}}

@@ -24,7 +24,7 @@ var templatesFS embed.FS
 var staticFS embed.FS
 
 // pages lists every content template that gets rendered inside the shared layout.
-var pages = []string{"login.html", "search.html", "bins.html", "bin_edit.html", "items.html", "item_edit.html", "account.html", "backup.html"}
+var pages = []string{"login.html", "search.html", "bins.html", "bin_edit.html", "bin_delete.html", "items.html", "item_edit.html", "item_delete.html", "account.html", "backup.html"}
 
 // noDirListing wraps a handler (typically an http.FileServer) so that
 // directory-style requests 404 instead of rendering an auto-generated file
@@ -103,10 +103,14 @@ func main() {
 	mux.HandleFunc("GET /bins", h.ListBins)
 	mux.HandleFunc("POST /bins", h.CreateBin)
 	mux.HandleFunc("GET /bins/{id}/edit", h.EditBinForm)
+	mux.HandleFunc("GET /bins/{id}/delete", h.DeleteBinConfirm)
+	mux.HandleFunc("POST /bins/{id}/delete", h.DeleteBin)
 	mux.HandleFunc("POST /bins/{id}", h.UpdateBin)
 	mux.HandleFunc("GET /items", h.ListItems)
 	mux.HandleFunc("POST /items", h.CreateItem)
 	mux.HandleFunc("GET /items/{id}/edit", h.EditItemForm)
+	mux.HandleFunc("GET /items/{id}/delete", h.DeleteItemConfirm)
+	mux.HandleFunc("POST /items/{id}/delete", h.DeleteItem)
 	mux.HandleFunc("POST /items/{id}", h.UpdateItem)
 	mux.HandleFunc("POST /items/tag", h.TagItems)
 	mux.Handle("GET /static/", noDirListing(http.StripPrefix("/static/", http.FileServer(http.FS(static)))))

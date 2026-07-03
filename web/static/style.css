@@ -183,6 +183,15 @@ button.secondary:hover {
   background: var(--color-bg);
 }
 
+button.danger {
+  background: var(--color-error);
+  color: var(--color-bg);
+}
+
+button.danger:hover {
+  filter: brightness(0.92);
+}
+
 .button-link {
   display: block;
   text-align: center;
@@ -231,6 +240,16 @@ button.secondary:hover {
 
 .bin-row a:hover {
   text-decoration: underline;
+}
+
+.row-actions {
+  display: flex;
+  gap: 0.75rem;
+  white-space: nowrap;
+}
+
+.row-actions a.delete {
+  color: var(--color-error);
 }
 
 .badge {

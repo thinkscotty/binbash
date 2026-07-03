@@ -172,11 +172,85 @@ func (h *Handlers) UpdateBin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/bins", http.StatusSeeOther)
 }
 
+func (h *Handlers) DeleteBinConfirm(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	bin, err := h.loadBin(id)
+	if err == sql.ErrNoRows {
+		http.NotFound(w, r)
+		return
+	} else if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	count, err := h.binItemCount(id)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	h.render(w, "bin_delete.html", map[string]any{"Bin": bin, "ItemCount": count})
+}
+
+func (h *Handlers) DeleteBin(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	tx, err := h.DB.Begin()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Clear the bin's items first: the items -> bins foreign key would block
+	// removing a non-empty bin otherwise. Each deleted row fires the items_ad
+	// trigger that keeps the FTS index in sync. Doing both deletes in one
+	// transaction means we never leave items orphaned by a half-done delete.
+	if _, err := tx.Exec(`DELETE FROM items WHERE bin_id = ?`, id); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	res, err := tx.Exec(`DELETE FROM bins WHERE id = ?`, id)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		// No such bin: nothing meaningful was staged, so roll back and 404.
+		http.NotFound(w, r)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/bins", http.StatusSeeOther)
+}
+
 // binExists reports whether a bin with the given id is present.
 func (h *Handlers) binExists(id int64) (bool, error) {
 	var n int
 	err := h.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM bins WHERE id = ?)`, id).Scan(&n)
 	return n == 1, err
+}
+
+// binItemCount returns how many items currently live in the given bin.
+func (h *Handlers) binItemCount(id int64) (int, error) {
+	var n int
+	err := h.DB.QueryRow(`SELECT COUNT(*) FROM items WHERE bin_id = ?`, id).Scan(&n)
+	return n, err
 }
 
 // binNameTaken reports whether a bin other than excludeID already has name.

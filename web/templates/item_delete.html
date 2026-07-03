@@ -1,0 +1,13 @@
+{{define "content"}}
+<section class="card">
+  <h1>Delete item</h1>
+  <p>Are you sure you want to delete <strong>{{.Item.Name}}</strong>
+     <span class="badge">{{.Item.BinName}}</span>?</p>
+  {{if .Item.Description}}<p class="subtle">{{.Item.Description}}</p>{{end}}
+  <p class="subtle">This can't be undone.</p>
+  <form method="POST" action="/items/{{.Item.ID}}/delete">
+    <button type="submit" class="danger">Delete item</button>
+  </form>
+  <a class="back-link" href="/items">&larr; Cancel</a>
+</section>
+{{end}}

@@ -160,6 +160,47 @@ func (h *Handlers) UpdateItem(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/items", http.StatusSeeOther)
 }
 
+func (h *Handlers) DeleteItemConfirm(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	item, err := h.loadItem(id)
+	if err == sql.ErrNoRows {
+		http.NotFound(w, r)
+		return
+	} else if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	h.render(w, "item_delete.html", map[string]any{"Item": item})
+}
+
+func (h *Handlers) DeleteItem(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	// The items_ad trigger keeps the FTS index in sync on delete, so search
+	// won't surface a ghost of the removed item.
+	res, err := h.DB.Exec(`DELETE FROM items WHERE id = ?`, id)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		http.NotFound(w, r)
+		return
+	}
+
+	http.Redirect(w, r, "/items", http.StatusSeeOther)
+}
+
 func (h *Handlers) loadItem(id int64) (Item, error) {
 	var it Item
 	err := h.DB.QueryRow(
