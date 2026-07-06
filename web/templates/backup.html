@@ -24,7 +24,8 @@
   </form>
 
   <h2>Import</h2>
-  <p class="subtle">Load items from a binbash CSV export. Items are added to your existing inventory by default; bins are matched by name or created if they don't exist yet.</p>
+  <p class="subtle">Load items from a binbash or Homebox CSV export &mdash; the format is detected automatically. Items are added to your existing inventory by default; bins are matched by name or created if they don't exist yet.</p>
+  <p class="subtle">Migrating from Homebox: an item's location must name a bin (e.g. &ldquo;Garage / Bin 3&rdquo;), and the deepest bin in the path is used. Items in a location with no bin are skipped, and Homebox-only fields such as quantity and warranty aren't imported.</p>
   <form method="POST" action="/backup/import" enctype="multipart/form-data">
     <label for="file">CSV file</label>
     <input type="file" id="file" name="file" accept=".csv" required>

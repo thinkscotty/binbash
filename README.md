@@ -20,18 +20,19 @@ binbash is a single, self-contained binary. There's no database server to run, n
   - [Overriding with environment variables](#overriding-with-environment-variables)
 - [AI tagging](#ai-tagging)
 - [Backups](#backups)
+  - [Migrating from Homebox](#migrating-from-homebox)
 - [Running as a service (systemd)](#running-as-a-service-systemd)
 - [Running with Docker](#running-with-docker)
+- [Upgrading](#upgrading)
 - [Put a reverse proxy in front](#put-a-reverse-proxy-in-front)
 - [Building from source](#building-from-source)
 - [License](#license)
 
 ## What you need
 
-- A computer or server to run it on — Linux, macOS, or Windows, on either Intel/AMD (`amd64`) or ARM (`arm64`, e.g. a Raspberry Pi 4/5 or an ARM VPS).
-- Nothing else. The binary has no dependencies.
-
-binbash listens on plain HTTP behind a single shared password. That's fine on your home network or a private/VPN-only host, but **don't expose it directly to the internet** — see [Put a reverse proxy in front](#put-a-reverse-proxy-in-front).
+- A hosting computer. This is a web application, not a desktop application. This can run with very small resources (e.g. Raspberry Pi or small VPS), but the computer will need to be continually network-connected. A VPS or Home Server running Linux is recommended.
+- Enough knowledge to use a command terminal and set up basic web services
+- The application is a self-contained Binary, so has no dependencies. NGINX or another reverse proxy are absolutely required if you want this to be connected to the internet outside your local network. DO NOT CONNECT TO THE INTERNET WITHOUT A REVERSE PROXY.
 
 ## Install
 
@@ -205,6 +206,12 @@ Visit **Backup** in the nav to download a CSV of your whole inventory (one row p
 
 To automate it, set `auto_backup_dir` to a writable directory. binbash then writes one of these CSVs automatically once that threshold is crossed, keeping the 5 most recent.
 
+### Migrating from Homebox
+
+The same **Import** button also accepts a [Homebox](https://homebox.software) CSV item export — binbash detects the format automatically, so you just upload the file Homebox gives you. It brings across each item's **name**, **description**, **tags** (as keywords), and **location**; Homebox-only fields such as quantity, warranty, and purchase details are dropped, since binbash tracks *where* things are rather than stock levels or provenance.
+
+Because binbash bins are flat while Homebox locations nest, the import looks at each item's location path and uses the **deepest part that names a bin** as the binbash bin — so `Garage / Bin 3` and `Garage / Bin 3 / Small Tray` both land in **Bin 3**. Items whose location names no bin at all (e.g. loose in `Garage`) are skipped rather than dumped into a catch-all, and the result message tells you how many were skipped. Bins are matched to any you already have by name, or created as needed, so it's safe to run into an existing inventory — though a migration is usually cleanest into an empty one.
+
 ## Running as a service (systemd)
 
 On a Linux server you'll usually want binbash to start on boot and restart if it crashes. A sample unit is in the repo at [`deploy/binbash.service`](deploy/binbash.service).
@@ -249,6 +256,62 @@ docker run -d \
 ```
 
 The image sets `BINBASH_DB_PATH=/data/binbash.db`, so mount `/data` to persist the database (and any auto-backups, if you point `auto_backup_dir` somewhere under `/data`). You can pass any setting as a `-e BINBASH_*` flag, or mount your own config file to `/app/binbash.toml`.
+
+## Upgrading
+
+Your inventory lives in a SQLite database file (`data/binbash.db` by default) that is completely separate from the `binbash` binary, and binbash applies any schema changes automatically the next time it starts. So upgrading is just **swapping in the new binary** — you don't export, re-import, or migrate anything by hand, and your data stays exactly where it is.
+
+**Restoring from a CSV is _not_ the upgrade path.** A CSV backup is a safety net for disaster recovery or moving to a new machine; it deliberately doesn't carry AI tags, timestamps, or internal IDs, so round-tripping your whole inventory through one would mark every item as un-tagged again (and a later AI-tag run would re-tag, and re-bill, all of it). Keep the database file in place and none of that is touched.
+
+### Before you upgrade
+
+Take a quick safety copy first, in case you ever want to roll back — schema migrations only move **forward**, so a new binary can upgrade an old database, but an old binary can't open a newer one:
+
+- **Easiest:** open **Backup** in the app and download a CSV.
+- **Complete:** with binbash stopped, copy the database and its two sidecar files together — `binbash.db`, `binbash.db-wal`, and `binbash.db-shm`. That's a byte-for-byte snapshot you restore by copying them back.
+
+It's also worth [verifying the new download's checksum](#2-verify-the-download-optional) before you install it.
+
+### systemd install
+
+From your freshly downloaded and extracted release:
+
+```sh
+sudo systemctl stop binbash                  # let it flush and release the database
+sudo cp binbash /opt/binbash/binbash         # overwrite the old binary
+sudo chown binbash:binbash /opt/binbash/binbash
+sudo systemctl start binbash                 # applies any new migrations on boot
+```
+
+Then confirm it came back up cleanly:
+
+```sh
+systemctl status binbash
+journalctl -u binbash -n 20
+```
+
+You'll see the usual `binbash listening on :8080`. Your config file and `./data` database are untouched — nothing else to change.
+
+### Docker
+
+Rebuild (or pull) the image, then recreate the container. The `-v ./data:/data` mount keeps your database across the swap:
+
+```sh
+docker build -t binbash .                     # or pull the new image
+docker stop binbash && docker rm binbash
+docker run -d \
+  --name binbash \
+  -p 8080:8080 \
+  -e BINBASH_PASSWORD=change-this-to-something-strong \
+  -v ./data:/data \
+  binbash
+```
+
+Because the database lives on the mounted volume, it survives the container being removed and recreated.
+
+### If something looks wrong
+
+Check the logs first (`journalctl -u binbash` or `docker logs binbash`). A migration that fails is logged and stops startup rather than half-applying, so your data isn't left in a partial state. To roll back, reinstall the previous binary — and if a new migration had already run, restore the database snapshot you copied above.
 
 ## Put a reverse proxy in front
 

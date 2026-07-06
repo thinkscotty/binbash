@@ -76,6 +76,14 @@ func (h *Handlers) ExportBackup(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// importRow is one item plus the bin it belongs in, parsed from an uploaded
+// CSV (binbash's own export or a foreign format such as Homebox) and ready to
+// be loaded by commitImport.
+type importRow struct {
+	itemName, itemDescription, keywords  string
+	binName, binCategory, binDescription string
+}
+
 func (h *Handlers) ImportBackup(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxImportFileSize)
 	if err := r.ParseMultipartForm(maxImportFileSize); err != nil {
@@ -103,18 +111,70 @@ func (h *Handlers) ImportBackup(w http.ResponseWriter, r *http.Request) {
 		h.renderBackup(w, map[string]any{"Error": "That file couldn't be parsed as CSV."})
 		return
 	}
-	if len(records) == 0 || !equalHeader(records[0], backupCSVHeader) {
-		h.renderBackup(w, map[string]any{
-			"Error": fmt.Sprintf("That doesn't look like a binbash export. Expected columns: %s", strings.Join(backupCSVHeader, ", ")),
-		})
+	if len(records) == 0 {
+		h.renderBackup(w, map[string]any{"Error": "That file is empty."})
 		return
 	}
 
-	type importRow struct {
-		itemName, itemDescription, keywords, binName, binCategory, binDescription string
+	// Pick a parser by sniffing the header row. binbash's own export is strict
+	// (any bad row aborts); the Homebox path is lenient and reports how many
+	// rows it skipped, appended to the success message as skipNote.
+	var (
+		rows     []importRow
+		skipNote string
+		errMsg   string
+	)
+	switch {
+	case equalHeader(records[0], backupCSVHeader):
+		rows, errMsg = parseBinbashCSV(records)
+	case isHomeboxHeader(records[0]):
+		var noBin, archived, noName int
+		rows, noBin, archived, noName = parseHomeboxCSV(records)
+		skipNote = homeboxSkipNote(noBin, archived, noName)
+	default:
+		errMsg = fmt.Sprintf("That doesn't look like a binbash or Homebox export. A binbash export starts with the columns: %s", strings.Join(backupCSVHeader, ", "))
+	}
+	if errMsg != "" {
+		h.renderBackup(w, map[string]any{"Error": errMsg})
+		return
 	}
 
-	rows := make([]importRow, 0, len(records)-1)
+	replace := r.FormValue("replace") == "on"
+
+	// Guard against a destructive no-op: "Replace" wipes the whole inventory
+	// before loading the file, but the Homebox path can legitimately reduce a
+	// full-looking export to zero importable rows (e.g. no location names a
+	// bin). Wiping and then loading nothing would silently destroy the user's
+	// data, so refuse rather than replace with an empty set.
+	if replace && len(rows) == 0 {
+		h.renderBackup(w, map[string]any{"Error": "That file had no importable items, so nothing was replaced — your existing inventory is unchanged."})
+		return
+	}
+
+	itemCount, newBins, err := h.commitImport(rows, replace)
+	if err != nil {
+		log.Printf("import: commit: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// Deliberately not calling markBackupDone here: importing is a restore, not
+	// a backup, so it shouldn't reset the "when did I last back up" watermark.
+	summary := fmt.Sprintf("Imported %d item(s) (%d new bin(s)).", itemCount, newBins)
+	if skipNote != "" {
+		summary += " " + skipNote
+	}
+	h.renderBackup(w, map[string]any{"Success": summary})
+}
+
+// parseBinbashCSV converts the rows of a binbash export (row 0 already
+// confirmed to carry backupCSVHeader) into importRows. It returns a
+// human-friendly message for the first invalid row, preserving the strict
+// all-or-nothing validation the export/import round-trip relies on: binbash's
+// own data is expected to already be within limits, so anything out of bounds
+// signals a corrupt or hand-edited file worth rejecting outright.
+func parseBinbashCSV(records [][]string) (rows []importRow, errMsg string) {
+	rows = make([]importRow, 0, len(records)-1)
 	for i, rec := range records[1:] {
 		row := importRow{
 			itemName:        desanitizeCSVField(strings.TrimSpace(rec[0])),
@@ -125,29 +185,33 @@ func (h *Handlers) ImportBackup(w http.ResponseWriter, r *http.Request) {
 			binDescription:  desanitizeCSVField(strings.TrimSpace(rec[5])),
 		}
 		if formErr := validateImportRow(row.itemName, row.itemDescription, row.keywords, row.binName, row.binCategory, row.binDescription); formErr != "" {
-			h.renderBackup(w, map[string]any{"Error": fmt.Sprintf("Row %d: %s", i+2, formErr)})
-			return
+			return nil, fmt.Sprintf("Row %d: %s", i+2, formErr)
 		}
 		rows = append(rows, row)
 	}
+	return rows, ""
+}
 
-	replace := r.FormValue("replace") == "on"
-
+// commitImport loads rows into the database in a single all-or-nothing
+// transaction. Bins are matched to existing rows by exact name and created on
+// demand; an existing bin's category/description is left untouched, so
+// importing a name that already exists merges into it rather than duplicating.
+// When replace is true, all current bins and items are deleted first and the
+// backup watermark reset. It returns the number of items inserted and the
+// number of bins newly created.
+func (h *Handlers) commitImport(rows []importRow, replace bool) (itemCount, newBins int, err error) {
 	tx, err := h.DB.Begin()
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+		return 0, 0, err
 	}
 	defer tx.Rollback()
 
 	if replace {
 		if _, err := tx.Exec(`DELETE FROM items`); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
+			return 0, 0, err
 		}
 		if _, err := tx.Exec(`DELETE FROM bins`); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
+			return 0, 0, err
 		}
 		// Without AUTOINCREMENT, item ids restart at 1 once the table is empty,
 		// so the existing "id > watermark" backup-due check would otherwise stay
@@ -155,34 +219,29 @@ func (h *Handlers) ImportBackup(w http.ResponseWriter, r *http.Request) {
 		// past whatever it reached before. Reset it so newly-loaded items count
 		// correctly toward the next backup reminder/auto-backup.
 		if _, err := tx.Exec(`UPDATE backup_state SET last_backup_max_item_id = 0 WHERE id = 1`); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
+			return 0, 0, err
 		}
 	}
 
 	binIDs := map[string]int64{}
 	binRows, err := tx.Query(`SELECT id, name FROM bins`)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+		return 0, 0, err
 	}
 	for binRows.Next() {
 		var id int64
 		var name string
 		if err := binRows.Scan(&id, &name); err != nil {
 			binRows.Close()
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
+			return 0, 0, err
 		}
 		binIDs[name] = id
 	}
 	binRows.Close()
 	if err := binRows.Err(); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+		return 0, 0, err
 	}
 
-	newBins := 0
 	for _, row := range rows {
 		binID, ok := binIDs[row.binName]
 		if !ok {
@@ -191,13 +250,11 @@ func (h *Handlers) ImportBackup(w http.ResponseWriter, r *http.Request) {
 				row.binName, row.binDescription, row.binCategory,
 			)
 			if err != nil {
-				http.Error(w, "internal error", http.StatusInternalServerError)
-				return
+				return 0, 0, err
 			}
 			binID, err = res.LastInsertId()
 			if err != nil {
-				http.Error(w, "internal error", http.StatusInternalServerError)
-				return
+				return 0, 0, err
 			}
 			binIDs[row.binName] = binID
 			newBins++
@@ -206,21 +263,14 @@ func (h *Handlers) ImportBackup(w http.ResponseWriter, r *http.Request) {
 			`INSERT INTO items (bin_id, name, description, keywords) VALUES (?, ?, ?, ?)`,
 			binID, row.itemName, row.itemDescription, row.keywords,
 		); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
+			return 0, 0, err
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+		return 0, 0, err
 	}
-
-	// Deliberately not calling markBackupDone here: importing is a restore, not
-	// a backup, so it shouldn't reset the "when did I last back up" watermark.
-	h.renderBackup(w, map[string]any{
-		"Success": fmt.Sprintf("Imported %d item(s) (%d new bin(s)).", len(rows), newBins),
-	})
+	return len(rows), newBins, nil
 }
 
 // renderBackup refreshes the auto-backup/reminder status and renders backup.html.
