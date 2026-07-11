@@ -20,8 +20,13 @@ const sqliteConstraintUniqueCode = 2067
 // isDuplicateNameErr reports whether err is the idx_bins_name UNIQUE index
 // being tripped. It's the only constraint an INSERT/UPDATE on bins can
 // violate, so this match is unambiguous here. This catches the race the
-// binNameTaken pre-check can't: two concurrent requests can both pass that
+// existingBinName pre-check can't: two concurrent requests can both pass that
 // check before either writes, so the write itself has to be the final word.
+//
+// The index is case-sensitive, so it only backstops an exact-name race, not a
+// case-differing one ("garage" and "Garage" submitted simultaneously). Losing
+// that particular race requires two people creating case-variants of the same
+// bin in the same instant, which a single-household instance will not do.
 func isDuplicateNameErr(err error) bool {
 	var sqliteErr *sqlite.Error
 	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteConstraintUniqueCode
@@ -34,6 +39,14 @@ type Bin struct {
 	Category    string
 }
 
+// BinWithItems is a bin together with everything stored in it, backing the
+// expandable bin list on the bins page. Bin is embedded, so templates reach its
+// fields directly as {{.Name}}, {{.ID}}, and so on.
+type BinWithItems struct {
+	Bin
+	Items []Item
+}
+
 func (h *Handlers) ListBins(w http.ResponseWriter, r *http.Request) {
 	h.renderBins(w, nil)
 }
@@ -44,7 +57,10 @@ func (h *Handlers) CreateBin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := strings.TrimSpace(r.FormValue("name"))
+	// Normalize before validating so the stored name, the length check, and the
+	// value echoed back into the form on error are all the same string. Bin
+	// edits deliberately skip this (see UpdateBin); creation is the fast path.
+	name := titleCase(strings.TrimSpace(r.FormValue("name")))
 	description := strings.TrimSpace(r.FormValue("description"))
 	category := strings.TrimSpace(r.FormValue("category"))
 
@@ -58,14 +74,14 @@ func (h *Handlers) CreateBin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	taken, err := h.binNameTaken(name, 0)
+	existing, err := h.existingBinName(name, 0)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if taken {
+	if existing != "" {
 		h.renderBins(w, map[string]any{
-			"Error":       fmt.Sprintf("A bin named %q already exists.", name),
+			"Error":       fmt.Sprintf("A bin named %q already exists.", existing),
 			"Name":        name,
 			"Description": description,
 			"Category":    category,
@@ -124,6 +140,9 @@ func (h *Handlers) UpdateBin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Not title-cased, matching item edits: the edit form is where a user takes
+	// control of casing. Uniqueness doesn't depend on that normalization anyway
+	// — existingBinName compares case-insensitively.
 	name := strings.TrimSpace(r.FormValue("name"))
 	description := strings.TrimSpace(r.FormValue("description"))
 	category := strings.TrimSpace(r.FormValue("category"))
@@ -136,14 +155,14 @@ func (h *Handlers) UpdateBin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	taken, err := h.binNameTaken(name, id)
+	existing, err := h.existingBinName(name, id)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if taken {
+	if existing != "" {
 		h.render(w, "bin_edit.html", map[string]any{
-			"Error": fmt.Sprintf("A bin named %q already exists.", name),
+			"Error": fmt.Sprintf("A bin named %q already exists.", existing),
 			"Bin":   Bin{ID: id, Name: name, Description: description, Category: category},
 		})
 		return
@@ -253,12 +272,33 @@ func (h *Handlers) binItemCount(id int64) (int, error) {
 	return n, err
 }
 
-// binNameTaken reports whether a bin other than excludeID already has name.
-// excludeID is 0 (never a real bin id) when checking a brand new bin.
-func (h *Handlers) binNameTaken(name string, excludeID int64) (bool, error) {
-	var n int
-	err := h.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM bins WHERE name = ? AND id != ?)`, name, excludeID).Scan(&n)
-	return n == 1, err
+// existingBinName returns the stored name of a bin other than excludeID whose
+// name matches name ignoring case, or "" if the name is free. excludeID is 0
+// (never a real bin id) when checking a brand new bin.
+//
+// The comparison is case-insensitive on purpose. Bins are matched by name
+// during CSV import (find-or-create), so letting "garage" and "Garage" coexist
+// would make that match ambiguous — exactly what idx_bins_name exists to
+// prevent. Title-casing new bin names used to imply this guarantee, but edits
+// no longer normalize, so the check has to stand on its own.
+//
+// Returning the stored name rather than a bool lets the caller name the bin the
+// user actually collided with ("A bin named "Garage" already exists") instead of
+// echoing back the differently-cased string they typed.
+//
+// NOCASE folds ASCII A-Z only, so it won't catch a case-differing collision
+// between two non-ASCII names. That's a far narrower gap than the case-sensitive
+// comparison it replaces, and closing it fully would mean rebuilding the unique
+// index with a custom collation.
+func (h *Handlers) existingBinName(name string, excludeID int64) (string, error) {
+	var existing string
+	err := h.DB.QueryRow(
+		`SELECT name FROM bins WHERE name = ? COLLATE NOCASE AND id != ?`, name, excludeID,
+	).Scan(&existing)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return existing, err
 }
 
 func (h *Handlers) loadBin(id int64) (Bin, error) {
@@ -270,7 +310,7 @@ func (h *Handlers) loadBin(id int64) (Bin, error) {
 }
 
 func (h *Handlers) renderBins(w http.ResponseWriter, data map[string]any) {
-	bins, err := h.loadBins()
+	bins, err := h.loadBinsWithItems()
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -281,6 +321,53 @@ func (h *Handlers) renderBins(w http.ResponseWriter, data map[string]any) {
 	}
 	data["Bins"] = bins
 	h.render(w, "bins.html", data)
+}
+
+// loadBinsWithItems returns every bin with its contents attached, for the
+// expandable bin list.
+//
+// It reads all items in one pass and groups them in memory rather than querying
+// per bin, so the page costs two queries no matter how many bins exist. The
+// whole inventory is rendered into the page (inside collapsed <details>, which
+// browsers don't paint until opened), which keeps expanding a bin instant and
+// entirely free of JavaScript. That trade holds comfortably at household scale;
+// if a library ever grew large enough for the page weight to bite, the fix is to
+// fetch each bin's contents lazily on first expand via htmx.
+func (h *Handlers) loadBinsWithItems() ([]BinWithItems, error) {
+	bins, err := h.loadBins()
+	if err != nil {
+		return nil, err
+	}
+	if len(bins) == 0 {
+		return nil, nil
+	}
+
+	binsWithItems := make([]BinWithItems, len(bins))
+	byID := make(map[int64]*BinWithItems, len(bins))
+	for i, b := range bins {
+		binsWithItems[i] = BinWithItems{Bin: b}
+		byID[b.ID] = &binsWithItems[i]
+	}
+
+	rows, err := h.DB.Query(
+		`SELECT id, bin_id, name, COALESCE(description, '') FROM items ORDER BY name`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var it Item
+		if err := rows.Scan(&it.ID, &it.BinID, &it.Name, &it.Description); err != nil {
+			return nil, err
+		}
+		if b, ok := byID[it.BinID]; ok {
+			b.Items = append(b.Items, it)
+		}
+	}
+
+	return binsWithItems, rows.Err()
 }
 
 func (h *Handlers) loadBins() ([]Bin, error) {

@@ -18,15 +18,36 @@
 
 <section class="card">
   <h2>All bins</h2>
+  <p class="subtle">Select a bin to see what's inside it.</p>
   {{if .Bins}}
     <ul class="bin-list">
       {{range .Bins}}
         <li class="bin-row">
-          <div>
-            <strong>{{.Name}}</strong>
-            {{if .Category}}<span class="badge">{{.Category}}</span>{{end}}
-            {{if .Description}}<p class="subtle">{{.Description}}</p>{{end}}
-          </div>
+          <details class="bin-details">
+            <summary>
+              <span class="bin-title">
+                <strong>{{.Name}}</strong>
+                {{if .Category}}<span class="badge">{{.Category}}</span>{{end}}
+                <span class="bin-count">{{len .Items}} item{{if ne (len .Items) 1}}s{{end}}</span>
+              </span>
+              {{if .Description}}<p class="subtle bin-description">{{.Description}}</p>{{end}}
+            </summary>
+            <div class="bin-contents">
+              {{if .Items}}
+                <ul class="item-sublist">
+                  {{range .Items}}
+                    <li>
+                      <a href="/items/{{.ID}}/edit">{{.Name}}</a>
+                      {{if .Description}}<span class="subtle"> — {{.Description}}</span>{{end}}
+                    </li>
+                  {{end}}
+                </ul>
+              {{else}}
+                <p class="subtle">This bin is empty.</p>
+              {{end}}
+              <a class="add-to-bin" href="/items?bin={{.ID}}">+ Add an item to this bin</a>
+            </div>
+          </details>
           <div class="row-actions">
             <a href="/bins/{{.ID}}/edit">Edit</a>
             <a class="delete" href="/bins/{{.ID}}/delete">Delete</a>

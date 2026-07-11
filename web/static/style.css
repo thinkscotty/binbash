@@ -303,6 +303,88 @@ button.danger:hover {
   font-size: 0.85rem;
 }
 
+/* Expandable bin contents on the bins page. <details> gives us open/close for
+   free, with no JavaScript and no round trip — the items are already in the
+   page. The bin's Edit/Delete links stay outside the <details> (they'd be
+   nested interactive elements inside <summary>, where a click would toggle the
+   panel instead of following the link), so the row keeps its existing layout
+   and the disclosure only adds the contents underneath. */
+.bin-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.bin-details summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+/* Suppress the platform disclosure marker in favour of the .bin-title arrow
+   below, which we can colour and align with the rest of the row. */
+.bin-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.bin-title::before {
+  content: "▸";
+  display: inline-block;
+  width: 1.1rem;
+  color: var(--color-accent-dark);
+}
+
+.bin-details[open] .bin-title::before {
+  content: "▾";
+}
+
+.bin-details summary:hover strong {
+  color: var(--color-accent);
+}
+
+.bin-details summary:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Line the description up under the bin name rather than under the arrow. */
+.bin-description {
+  margin-left: 1.1rem;
+}
+
+.bin-contents {
+  margin: 0.5rem 0 0.25rem 1.1rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--color-border);
+}
+
+.item-sublist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.item-sublist li {
+  padding: 0.3rem 0;
+  font-size: 0.9rem;
+}
+
+.item-sublist a {
+  color: var(--color-text);
+  /* .bin-row a sets nowrap for the Edit/Delete links; item names are free text
+     and need to wrap. */
+  white-space: normal;
+}
+
+.item-sublist a:hover {
+  color: var(--color-accent);
+}
+
+.add-to-bin {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
 .back-link {
   display: inline-block;
   margin-top: 0.5rem;

@@ -17,7 +17,16 @@ type Item struct {
 }
 
 func (h *Handlers) ListItems(w http.ResponseWriter, r *http.Request) {
-	h.renderItems(w, nil)
+	// ?bin=N preselects that bin in the add-item form, so "Add an item" from a
+	// bin on the bins page lands here ready to type. An unknown or malformed id
+	// just falls through to renderItems' usual default of the last-used bin.
+	var data map[string]any
+	if binID, err := strconv.ParseInt(r.URL.Query().Get("bin"), 10, 64); err == nil {
+		if exists, err := h.binExists(binID); err == nil && exists {
+			data = map[string]any{"SelectedBinID": binID}
+		}
+	}
+	h.renderItems(w, data)
 }
 
 func (h *Handlers) CreateItem(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +35,9 @@ func (h *Handlers) CreateItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := strings.TrimSpace(r.FormValue("name"))
+	// Normalize before validating so the stored name, the length check, and the
+	// value echoed back into the form on error are all the same string.
+	name := titleCase(strings.TrimSpace(r.FormValue("name")))
 	description := strings.TrimSpace(r.FormValue("description"))
 	keywords := strings.TrimSpace(r.FormValue("keywords"))
 	binID, binErr := strconv.ParseInt(r.FormValue("bin_id"), 10, 64)
@@ -106,6 +117,10 @@ func (h *Handlers) UpdateItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Deliberately *not* title-cased. Speed matters when first entering an item;
+	// by the time someone opens the edit form they want control, so an edit is
+	// the escape hatch for casing titleCase can't express — a brand that is
+	// meant to stay all-lowercase, say.
 	name := strings.TrimSpace(r.FormValue("name"))
 	description := strings.TrimSpace(r.FormValue("description"))
 	keywords := strings.TrimSpace(r.FormValue("keywords"))
