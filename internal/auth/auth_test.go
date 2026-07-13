@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/tls"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -37,6 +38,80 @@ func newTestAuth(t *testing.T, trusted ...string) *Auth {
 		t.Fatalf("new auth: %v", err)
 	}
 	return a
+}
+
+// TestBootstrapPasswordLifecycle pins the rule that lets the password be
+// deleted from the config file after first run: it is needed once, to create
+// the account, and is ignored forever after. Getting this wrong in either
+// direction is bad -- refusing to start without it keeps a plaintext secret on
+// disk for no reason, while letting a config value override the stored password
+// would mean anyone who could write the config could take over the account.
+func TestBootstrapPasswordLifecycle(t *testing.T) {
+	dir := t.TempDir()
+
+	open := func(t *testing.T) *sql.DB {
+		t.Helper()
+		database, err := db.Open(filepath.Join(dir, "test.db"))
+		if err != nil {
+			t.Fatalf("open db: %v", err)
+		}
+		t.Cleanup(func() { database.Close() })
+		return database
+	}
+
+	t.Run("first run with no password is a clear error", func(t *testing.T) {
+		_, err := New(open(t), "", DefaultTrustedProxies())
+		if err == nil {
+			t.Fatal("expected an error when there is no account and no password to create one from")
+		}
+		if !strings.Contains(err.Error(), "no account yet") {
+			t.Errorf("error should explain the situation, got: %v", err)
+		}
+	})
+
+	t.Run("first run bootstraps the account", func(t *testing.T) {
+		a, err := New(open(t), "bootstrap-password", DefaultTrustedProxies())
+		if err != nil {
+			t.Fatalf("new: %v", err)
+		}
+		if !a.CheckPassword("bootstrap-password") {
+			t.Error("bootstrap password does not work")
+		}
+	})
+
+	// The account now exists in the shared database directory.
+
+	t.Run("later runs need no password at all", func(t *testing.T) {
+		a, err := New(open(t), "", DefaultTrustedProxies())
+		if err != nil {
+			t.Fatalf("binbash refused to start without a password once an account exists: %v", err)
+		}
+		if !a.CheckPassword("bootstrap-password") {
+			t.Error("the stored password should still work after removing it from the config")
+		}
+	})
+
+	t.Run("a changed password survives, and the config cannot override it", func(t *testing.T) {
+		a, err := New(open(t), "", DefaultTrustedProxies())
+		if err != nil {
+			t.Fatalf("new: %v", err)
+		}
+		if err := a.Rotate("changed-in-the-app"); err != nil {
+			t.Fatalf("rotate: %v", err)
+		}
+
+		// Restart, with a stale (or hostile) password still in the config.
+		a, err = New(open(t), "bootstrap-password", DefaultTrustedProxies())
+		if err != nil {
+			t.Fatalf("new: %v", err)
+		}
+		if a.CheckPassword("bootstrap-password") {
+			t.Error("the config password overrode the one set in the app — anyone who can write the config could take the account")
+		}
+		if !a.CheckPassword("changed-in-the-app") {
+			t.Error("the password set in the app stopped working after a restart")
+		}
+	})
 }
 
 func TestParseTrustedProxies(t *testing.T) {

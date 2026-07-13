@@ -103,6 +103,14 @@ password = "change-this-to-something-strong"
 
 That's genuinely all you need to start. Every other setting is optional and covered in [Configuration](#configuration) below.
 
+Because this file holds a password (and, later, possibly an API key), keep it to yourself:
+
+```sh
+chmod 600 binbash.toml
+```
+
+binbash will warn you at startup if you forget.
+
 > **Why a file and not just environment variables?** A config file is easy to keep, back up, and edit later without remembering a string of `export` commands — and it's the recommended way to run binbash. Environment variables still work and still take precedence when set, which is handy for one-off overrides (see [Overriding with environment variables](#overriding-with-environment-variables)).
 
 ### 5. Run it
@@ -125,6 +133,16 @@ The SQLite database is created automatically at `./data/binbash.db` on first run
 Open <http://localhost:8080> (or `http://<server-ip>:8080` from another device on your network) and sign in with the password from your config file.
 
 That password only **bootstraps** your account on first run. Change it any time from **Settings → Change password** in the app — from then on the database is the source of truth, and editing `password` in the file again won't change your login.
+
+Which means that once you've signed in and set a real password in the app, **you can delete the `password` line from `binbash.toml` entirely.** binbash starts fine without it, and you're no longer keeping a plaintext password on disk that doesn't even open anything. It'll remind you of this at startup if you leave it there.
+
+> **Forgot your password?** There's no email reset — binbash has no idea who you are. To get back in, put a `password` line back in `binbash.toml`, clear the stored account, and restart:
+>
+> ```sh
+> sqlite3 data/binbash.db "DELETE FROM auth_settings;"
+> ```
+>
+> binbash will bootstrap a fresh account from your config password on the next start. (This also signs out every device, which is what you want if you're doing this because something looked wrong.)
 
 ## Configuration
 
@@ -183,7 +201,7 @@ tag_breadth = "moderate"  # how related suggestions should be: narrow | moderate
 
 | Config file | `[ai]` table? | Default | Purpose |
 |---|---|---|---|
-| `password` | no | *(required)* | Initial login password (8–72 characters). Bootstraps the account on first run; change it in-app afterward. |
+| `password` | no | *(required on first run only)* | Login password (8–72 characters) used to **create** your account on first run. Once the account exists this value is ignored — change the password in-app, then delete this line. |
 | `port` | no | `8080` | HTTP listen port. |
 | `bind_address` | no | `0.0.0.0` | Which interface to listen on. `0.0.0.0` is every interface; `127.0.0.1` restricts binbash to the local machine, so only a reverse proxy on that machine can reach it. Must be a literal IP address. |
 | `trusted_proxies` | no | `["127.0.0.1", "::1"]` | Reverse proxies whose `X-Forwarded-For` / `X-Forwarded-Proto` headers binbash trusts, as IPs or CIDR ranges. Anything not listed here has those headers ignored — that's what stops a visitor from simply *claiming* to be someone else. Set to `[]` to trust nobody. |
@@ -395,6 +413,8 @@ binbash ignores "the real visitor is X" headers from anyone not on this list —
 
 binbash has one password and no usernames. On the internet, that password is the entire lock on your front door. Use a long random one from a password manager. Change it in **Settings → Change password** — which also signs out every other device, so it doubles as the panic button if you ever think a session leaked.
 
+Then **delete the `password` line from `binbash.toml`**. It was only ever needed to create the account, and once it's gone there's no plaintext password sitting on the server at all. Make sure the config file is `chmod 600` regardless — it may still hold an AI API key.
+
 ### 4. Ban repeat offenders with fail2ban (optional)
 
 binbash already locks an IP out for 15 minutes after 5 wrong passwords. fail2ban goes further and drops repeat offenders at the firewall, so their traffic never reaches the app at all. Copy the two files from [`deploy/fail2ban/`](deploy/fail2ban/):
@@ -417,6 +437,7 @@ Once it's behind HTTPS, binbash handles the rest without configuration:
 - **Changing your password signs out every other session**, so a leaked cookie can actually be revoked.
 - **Cross-site requests are rejected**, so a malicious page you happen to visit can't quietly make your browser delete a bin or wipe your inventory.
 - **Security headers** (`Content-Security-Policy`, `X-Frame-Options`, `nosniff`, `Referrer-Policy`, HSTS) are set on every response — binbash can't be framed for a clickjacking attack, and the page can't load or send anything to a third-party host.
+- **Its files are kept private.** The database, its write-ahead log, backups and pre-update snapshots are all created readable only by the user binbash runs as (`0600`, in a `0700` directory), and an install upgraded from an older version gets tightened on the next start. This matters more than it sounds: the database stores the key used to sign session cookies, so anyone who can *read that file* can mint themselves a valid session and walk in without a password at all. On a machine running more than one service, that's the difference between one compromised app and two.
 
 ### What binbash does not do
 

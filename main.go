@@ -83,7 +83,12 @@ func main() {
 	}
 
 	if cfg.AutoBackupDir != "" {
-		if err := os.MkdirAll(cfg.AutoBackupDir, 0o755); err != nil {
+		if err := os.MkdirAll(cfg.AutoBackupDir, db.DirMode); err != nil {
+			log.Fatalf("auto-backup directory: %v", err)
+		}
+		// Backups are a full copy of the inventory, and pre-update snapshots
+		// kept here are full copies of the database. Same secrets, same rules.
+		if err := db.RestrictPermissions(cfg.AutoBackupDir); err != nil {
 			log.Fatalf("auto-backup directory: %v", err)
 		}
 	}

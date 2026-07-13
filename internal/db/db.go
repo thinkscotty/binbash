@@ -16,12 +16,22 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
+// DirMode is the permission new binbash data directories are created with:
+// owner only, no group, no world.
+const DirMode = 0o700
+
 // Open opens the SQLite database at path, creating its parent directory if
-// needed, and applies any pending migrations.
+// needed, applies any pending migrations, and makes sure neither the database
+// nor its directory is readable by anyone but the user binbash runs as.
 func Open(path string) (*sql.DB, error) {
 	if dir := filepath.Dir(path); dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, DirMode); err != nil {
 			return nil, fmt.Errorf("create db directory: %w", err)
+		}
+		// MkdirAll only applies the mode to directories it creates, so an
+		// install that predates this still has a 0755 data directory.
+		if err := RestrictPermissions(dir); err != nil {
+			return nil, fmt.Errorf("secure db directory: %w", err)
 		}
 	}
 
@@ -52,6 +62,12 @@ func Open(path string) (*sql.DB, error) {
 
 	if err := migrate(database); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
+	}
+
+	// After migrate, so the -wal and -shm sidecars WAL mode creates on first
+	// write already exist and get tightened along with the database itself.
+	if err := RestrictPermissions(path); err != nil {
+		return nil, fmt.Errorf("secure database file: %w", err)
 	}
 
 	return database, nil

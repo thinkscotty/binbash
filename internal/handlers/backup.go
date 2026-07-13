@@ -368,7 +368,11 @@ func (h *Handlers) checkAndRunAutoBackup() (newItems int, lastBackupAt sql.NullT
 	// valid backup -- which would otherwise count toward retention and could
 	// end up evicting a good backup in its place.
 	tmpPath := filepath.Join(h.AutoBackupDir, "."+filename+".tmp")
-	f, err := os.Create(tmpPath)
+	// 0600 rather than os.Create's 0666-minus-umask: a backup is a full copy of
+	// the inventory -- every item, every location, everything worth owning in
+	// the house -- and there is no reason for another user on the machine to be
+	// able to read it.
+	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		log.Printf("auto-backup: create %s: %v", tmpPath, err)
 		return newItems, lastBackupAt

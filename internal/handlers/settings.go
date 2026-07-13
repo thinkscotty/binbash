@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/thinkscotty/binbash/internal/auth"
+	"github.com/thinkscotty/binbash/internal/db"
 )
 
 // snapshotKeep is how many pre-update database snapshots survive pruning.
@@ -190,6 +191,14 @@ func (h *Handlers) snapshotDB() (string, error) {
 	// server-derived (config + generated name), not user input.
 	if _, err := h.DB.Exec("VACUUM INTO '" + strings.ReplaceAll(path, "'", "''") + "'"); err != nil {
 		return "", err
+	}
+
+	// SQLite writes the snapshot with default permissions, which leaves a
+	// world-readable copy of the database -- session-signing key and all --
+	// sitting on disk after every update. Same file, same secrets, same
+	// consequences as the live database, so it gets the same treatment.
+	if err := db.RestrictPermissions(path); err != nil {
+		return "", fmt.Errorf("secure snapshot: %w", err)
 	}
 
 	pruneSnapshots(dir)

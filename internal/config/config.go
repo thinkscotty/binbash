@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/netip"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -112,6 +113,7 @@ func Load() (*Config, error) {
 		}
 		applyFileConfig(cfg, fc)
 		log.Printf("config: loaded %s", path)
+		warnIfReadableByOthers(path)
 	} else if explicit {
 		return nil, fmt.Errorf("config file %s: %w", path, err)
 	}
@@ -137,14 +139,19 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("bind address must be an IP address like 0.0.0.0 or 127.0.0.1, not %q", cfg.BindAddress)
 	}
 
-	if cfg.Password == "" {
-		return nil, fmt.Errorf("password must be set, via BINBASH_PASSWORD or the config file")
-	}
-	if len(cfg.Password) < minBootstrapPasswordLen {
-		return nil, fmt.Errorf("password must be at least %d characters", minBootstrapPasswordLen)
-	}
-	if len(cfg.Password) > maxBootstrapPasswordLen {
-		return nil, fmt.Errorf("password must be at most %d bytes long", maxBootstrapPasswordLen)
+	// An absent password is no longer an error here. It is only needed to
+	// create the account on first run; from then on the database holds the
+	// (hashed) password and this value is ignored entirely, so leaving it in
+	// the config file just means a plaintext secret loitering on disk for no
+	// benefit. auth.New raises the error if it turns out there's no account
+	// yet and nothing to create one from -- it's the only layer that knows.
+	if cfg.Password != "" {
+		if len(cfg.Password) < minBootstrapPasswordLen {
+			return nil, fmt.Errorf("password must be at least %d characters", minBootstrapPasswordLen)
+		}
+		if len(cfg.Password) > maxBootstrapPasswordLen {
+			return nil, fmt.Errorf("password must be at most %d bytes long", maxBootstrapPasswordLen)
+		}
 	}
 
 	tagCountStr := getEnv("BINBASH_AI_TAG_COUNT", strconv.Itoa(cfg.AITagCount))
@@ -166,6 +173,36 @@ func Load() (*Config, error) {
 // AIEnabled reports whether AI tagging is configured.
 func (c *Config) AIEnabled() bool {
 	return c.AIBaseURL != ""
+}
+
+// warnIfReadableByOthers complains when the config file can be read by anyone
+// but its owner. The file holds the bootstrap password and any AI API key in
+// plaintext, which is the ordinary way self-hosted software stores such things
+// -- the control that makes it safe is the file's permissions, not the format.
+//
+// This warns rather than fixing it, because the config file is the operator's
+// own: silently rewriting the permissions on a file a human wrote and owns is
+// a surprise, whereas the database (which binbash creates and owns) is fair
+// game to tighten. This is what OpenSSH does with a too-permissive private
+// key, minus the refusing-to-start part.
+func warnIfReadableByOthers(path string) {
+	// Unix permission bits are meaningless on Windows -- Stat reports 0666 and
+	// we would warn on every startup with no way for the user to satisfy us.
+	if runtime.GOOS == "windows" {
+		return
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return // it just loaded, so this is nothing worth failing over
+	}
+	perm := info.Mode().Perm()
+	if perm&0o077 == 0 {
+		return
+	}
+
+	log.Printf("warning: %s is readable by other users on this machine (mode %#o).", path, perm)
+	log.Printf("warning: it contains your password and any API keys. Fix with: chmod 600 %s", path)
 }
 
 func applyFileConfig(cfg *Config, fc fileConfig) {

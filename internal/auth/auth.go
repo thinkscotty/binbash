@@ -11,7 +11,9 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
@@ -75,6 +77,13 @@ type attempt struct {
 // every later run the database is the source of truth; bootstrapPassword is
 // ignored once a row exists.
 //
+// That "ignored once a row exists" is why bootstrapPassword is allowed to be
+// empty. It is needed exactly once, to create the account; after that, keeping
+// it in the config file leaves a plaintext secret on disk that unlocks nothing.
+// So an empty value is only an error when there is no account to fall back on,
+// and when one is supplied redundantly we say so, because an operator can't be
+// expected to guess that the password in their config stopped mattering.
+//
 // proxies decides whose X-Forwarded-* headers are believed; pass
 // DefaultTrustedProxies() for the loopback-only default.
 func New(db *sql.DB, bootstrapPassword string, proxies *TrustedProxies) (*Auth, error) {
@@ -82,11 +91,22 @@ func New(db *sql.DB, bootstrapPassword string, proxies *TrustedProxies) (*Auth, 
 	if err != nil {
 		return nil, fmt.Errorf("load auth settings: %w", err)
 	}
-	if hash == nil {
+
+	switch {
+	case hash == nil && bootstrapPassword == "":
+		return nil, errors.New("no password is set, and binbash has no account yet. " +
+			"Set one in binbash.toml (password = \"...\") or via BINBASH_PASSWORD, then start binbash again. " +
+			"You only need it this once: after you sign in you can change the password in Settings, and remove it from the config file")
+
+	case hash == nil:
 		hash, key, err = bootstrap(db, bootstrapPassword)
 		if err != nil {
 			return nil, fmt.Errorf("bootstrap auth settings: %w", err)
 		}
+		log.Printf("created your binbash account from the configured password")
+
+	case bootstrapPassword != "":
+		log.Printf("note: binbash already has an account, so the password in your config is not used — the one you set in the app is. You can delete it from the config file (see the README if you ever need to reset a forgotten password)")
 	}
 
 	if proxies == nil {
