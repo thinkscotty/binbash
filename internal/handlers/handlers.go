@@ -12,6 +12,7 @@ import (
 
 	"github.com/thinkscotty/binbash/internal/ai"
 	"github.com/thinkscotty/binbash/internal/auth"
+	"github.com/thinkscotty/binbash/internal/update"
 )
 
 // Templates maps a page name (e.g. "login.html") to a template set combining
@@ -27,6 +28,12 @@ type Handlers struct {
 	AI            *ai.Client // nil when AI tagging is disabled
 	AITagCount    int
 	AITagBreadth  string
+
+	// Updater and RequestRestart back the settings page's self-update flow;
+	// main assigns them after New. RequestRestart asks main to gracefully
+	// shut down and re-exec once the update response has gone out.
+	Updater        *update.Updater
+	RequestRestart func()
 
 	// backupMu serializes checkAndRunAutoBackup's read-decide-write sequence
 	// against itself and against ExportBackup's markBackupDone call. Those are

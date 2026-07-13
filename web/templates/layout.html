@@ -3,7 +3,7 @@
   <a href="/items" class="{{if eq .CurrentPage "items"}}active{{end}}">Items</a>
   <a href="/bins" class="{{if eq .CurrentPage "bins"}}active{{end}}">Bins</a>
   <a href="/backup" class="{{if eq .CurrentPage "backup"}}active{{end}}">Backup</a>
-  <a href="/account" class="{{if eq .CurrentPage "account"}}active{{end}}">Account</a>
+  <a href="/settings" class="{{if eq .CurrentPage "settings"}}active{{end}}">Settings</a>
 {{end}}
 {{define "layout"}}
 <!DOCTYPE html>
@@ -11,7 +11,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  {{/* htmx injects a <style> element for loading indicators unless told not
+       to, which the Content-Security-Policy blocks. binbash uses no
+       indicators, so switching it off costs nothing and keeps the console
+       clean. Configuring htmx by meta tag rather than script keeps the page
+       free of inline JavaScript, which is what lets the CSP stay strict. */}}
+  <meta name="htmx-config" content='{"includeIndicatorStyles":false}'>
   <title>binbash</title>
+  {{if .MetaRefresh}}<meta http-equiv="refresh" content="{{.MetaRefresh}}">{{end}}
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>

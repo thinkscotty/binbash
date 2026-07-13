@@ -1,0 +1,63 @@
+{{define "content"}}
+<section class="card">
+  <h1>Change password</h1>
+  {{if .Error}}
+    <p class="error">{{.Error}}</p>
+  {{end}}
+  {{if .Success}}
+    <p class="subtle">{{.Success}}</p>
+  {{end}}
+  <form method="POST" action="/settings/password">
+    <label for="current_password">Current password</label>
+    <input type="password" id="current_password" name="current_password" required>
+    <label for="new_password">New password</label>
+    <input type="password" id="new_password" name="new_password" minlength="8" maxlength="72" required>
+    <label for="confirm_password">Confirm new password</label>
+    <input type="password" id="confirm_password" name="confirm_password" minlength="8" maxlength="72" required>
+    <button type="submit">Update password</button>
+  </form>
+</section>
+
+<section class="card">
+  <h1>Updates</h1>
+  <p class="subtle">Current version: binbash {{.Version}}</p>
+
+  {{if .Updated}}
+    <p class="update-success">Updated to {{.Updated}}.</p>
+    <p class="subtle">binbash is restarting — this page will reload in a few seconds.</p>
+    {{if .SnapshotPath}}
+      <p class="subtle">A database snapshot was saved to <code>{{.SnapshotPath}}</code>.</p>
+    {{end}}
+  {{else}}
+    {{if .UpdateError}}
+      <p class="error">{{.UpdateError}}</p>
+    {{end}}
+    {{if .UpdateStatus}}
+      <p class="subtle">{{.UpdateStatus}}</p>
+    {{end}}
+
+    {{if .UpdateAvailable}}
+      <div class="update-panel">
+        <p><strong>{{.UpdateAvailable.Tag}}</strong> is available.
+          <a href="{{.UpdateAvailable.URL}}" target="_blank" rel="noopener">Release notes</a></p>
+        <p class="subtle">Before updating, download a backup of your inventory.
+          A snapshot of the database is also saved automatically.</p>
+        <form method="POST" action="/backup/export">
+          <button type="submit" class="secondary">Download CSV backup</button>
+        </form>
+        <form method="POST" action="/settings/update">
+          <input type="hidden" name="tag" value="{{.UpdateAvailable.Tag}}">
+          <button type="submit">Update to {{.UpdateAvailable.Tag}}</button>
+        </form>
+        <p class="subtle update-hint">The update is downloaded, verified, and installed in place —
+          this can take a minute on a slow connection. binbash restarts itself when it's done.</p>
+      </div>
+    {{else}}
+      <form method="POST" action="/settings/check-update">
+        <button type="submit" class="secondary">Check for updates</button>
+      </form>
+    {{end}}
+  {{end}}
+  <a class="back-link" href="/">&larr; Back to search</a>
+</section>
+{{end}}

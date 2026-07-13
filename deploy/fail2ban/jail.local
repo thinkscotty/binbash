@@ -1,0 +1,33 @@
+# fail2ban jail for binbash.
+#
+# Install to: /etc/fail2ban/jail.d/binbash.local
+# (alongside the filter at /etc/fail2ban/filter.d/binbash.conf)
+#
+# Then:
+#   sudo systemctl restart fail2ban
+#   sudo fail2ban-client status binbash
+#
+# binbash already throttles password guessing itself (5 attempts, then a
+# 15-minute lockout per IP). This jail is the layer above that: it drops repeat
+# offenders at the firewall, so their traffic stops reaching binbash at all --
+# which also stops them burning CPU on bcrypt, which is slow by design.
+#
+# The ban applies to the client's IP on the ports you actually serve, so it
+# takes effect in front of your reverse proxy rather than in front of binbash's
+# own (loopback-bound) port.
+
+[binbash]
+enabled  = true
+backend  = systemd
+filter   = binbash
+port     = http,https
+
+# Five failures within fifteen minutes -- the same budget binbash's own
+# throttle gives -- earns an hour at the firewall.
+maxretry = 5
+findtime = 15m
+bantime  = 1h
+
+# Uncomment to make each repeat ban progressively longer, up to a week.
+# bantime.increment = true
+# bantime.maxtime   = 1w

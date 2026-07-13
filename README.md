@@ -24,7 +24,13 @@ binbash is a single, self-contained binary. There's no database server to run, n
 - [Running as a service (systemd)](#running-as-a-service-systemd)
 - [Running with Docker](#running-with-docker)
 - [Upgrading](#upgrading)
-- [Put a reverse proxy in front](#put-a-reverse-proxy-in-front)
+- [Exposing binbash to the internet](#exposing-binbash-to-the-internet)
+  - [1. Terminate HTTPS with a reverse proxy](#1-terminate-https-with-a-reverse-proxy)
+  - [2. Bind binbash to localhost](#2-bind-binbash-to-localhost)
+  - [3. Use a strong password](#3-use-a-strong-password)
+  - [4. Ban repeat offenders with fail2ban (optional)](#4-ban-repeat-offenders-with-fail2ban-optional)
+  - [What binbash does for you](#what-binbash-does-for-you)
+  - [What binbash does not do](#what-binbash-does-not-do)
 - [Building from source](#building-from-source)
 - [License](#license)
 
@@ -32,7 +38,7 @@ binbash is a single, self-contained binary. There's no database server to run, n
 
 - A hosting computer. This is a web application, not a desktop application. This can run with very small resources (e.g. Raspberry Pi or small VPS), but the computer will need to be continually network-connected. A VPS or Home Server running Linux is recommended.
 - Enough knowledge to use a command terminal and set up basic web services
-- The application is a self-contained Binary, so has no dependencies. NGINX or another reverse proxy are absolutely required if you want this to be connected to the internet outside your local network. DO NOT CONNECT TO THE INTERNET WITHOUT A REVERSE PROXY.
+- The application is a self-contained binary, so it has no dependencies. On a home network you can run it as-is. To reach it from outside your home network you'll also need a reverse proxy (Caddy, nginx, Traefik) to put HTTPS in front of it — binbash speaks plain HTTP, so without one your password crosses the internet in the clear. See [Exposing binbash to the internet](#exposing-binbash-to-the-internet).
 
 ## Install
 
@@ -109,7 +115,7 @@ You should see:
 
 ```
 config: loaded ./binbash.toml
-binbash listening on :8080
+binbash <version> listening on :8080
 ```
 
 The SQLite database is created automatically at `./data/binbash.db` on first run.
@@ -118,7 +124,7 @@ The SQLite database is created automatically at `./data/binbash.db` on first run
 
 Open <http://localhost:8080> (or `http://<server-ip>:8080` from another device on your network) and sign in with the password from your config file.
 
-That password only **bootstraps** your account on first run. Change it any time from **Account → Change password** in the app — from then on the database is the source of truth, and editing `password` in the file again won't change your login.
+That password only **bootstraps** your account on first run. Change it any time from **Settings → Change password** in the app — from then on the database is the source of truth, and editing `password` in the file again won't change your login.
 
 ## Configuration
 
@@ -141,6 +147,20 @@ password = "change-this-to-something-strong"
 
 # HTTP port to listen on.
 port = "8080"
+
+# Which network interface to listen on. The default accepts connections from
+# anywhere, which is what you want on a home network. If you're putting binbash
+# on the public internet behind a reverse proxy, set this to "127.0.0.1" so the
+# app can ONLY be reached through the proxy. See "Exposing binbash to the
+# internet" below.
+bind_address = "0.0.0.0"
+
+# Reverse proxies whose "the real visitor is X" headers binbash should believe.
+# Defaults to the local machine, which covers a proxy running on the same box
+# — the usual setup, and nothing to change. If your proxy runs elsewhere (a
+# Docker container, another server), list its address or network here, or
+# binbash will think every visitor is the proxy.
+trusted_proxies = ["127.0.0.1", "::1"]
 
 # Where the SQLite database lives. The parent directory is created for you.
 db_path = "./data/binbash.db"
@@ -165,6 +185,8 @@ tag_breadth = "moderate"  # how related suggestions should be: narrow | moderate
 |---|---|---|---|
 | `password` | no | *(required)* | Initial login password (8–72 characters). Bootstraps the account on first run; change it in-app afterward. |
 | `port` | no | `8080` | HTTP listen port. |
+| `bind_address` | no | `0.0.0.0` | Which interface to listen on. `0.0.0.0` is every interface; `127.0.0.1` restricts binbash to the local machine, so only a reverse proxy on that machine can reach it. Must be a literal IP address. |
+| `trusted_proxies` | no | `["127.0.0.1", "::1"]` | Reverse proxies whose `X-Forwarded-For` / `X-Forwarded-Proto` headers binbash trusts, as IPs or CIDR ranges. Anything not listed here has those headers ignored — that's what stops a visitor from simply *claiming* to be someone else. Set to `[]` to trust nobody. |
 | `db_path` | no | `./data/binbash.db` | SQLite database file location. Its parent directory is created automatically. |
 | `auto_backup_dir` | no | *(empty = disabled)* | Directory to write automatic CSV backups to. |
 | `base_url` | yes | *(empty = AI off)* | OpenAI-compatible endpoint. Include any path prefix the provider needs (e.g. `https://api.openai.com/v1`) — `/chat/completions` is appended to it. |
@@ -182,6 +204,8 @@ Every setting also has a `BINBASH_*` environment variable, and **environment var
 | `BINBASH_CONFIG` | *(not in the file)* — path to the config file itself. |
 | `BINBASH_PASSWORD` | `password` |
 | `BINBASH_PORT` | `port` |
+| `BINBASH_BIND_ADDRESS` | `bind_address` |
+| `BINBASH_TRUSTED_PROXIES` | `trusted_proxies` (comma-separated, e.g. `172.17.0.0/16,10.0.0.5`) |
 | `BINBASH_DB_PATH` | `db_path` |
 | `BINBASH_AUTO_BACKUP_DIR` | `auto_backup_dir` |
 | `BINBASH_AI_BASE_URL` | `[ai].base_url` |
@@ -257,13 +281,31 @@ docker run -d \
 
 The image sets `BINBASH_DB_PATH=/data/binbash.db`, so mount `/data` to persist the database (and any auto-backups, if you point `auto_backup_dir` somewhere under `/data`). You can pass any setting as a `-e BINBASH_*` flag, or mount your own config file to `/app/binbash.toml`.
 
+If you put a **containerised reverse proxy** in front of binbash, that proxy isn't on localhost as far as the container is concerned, so tell binbash to trust it — otherwise binbash sees every visitor as the proxy and one person's failed logins lock out everybody:
+
+```sh
+-e BINBASH_TRUSTED_PROXIES=172.17.0.0/16   # your Docker network
+```
+
+Also note that the in-app updater refuses to run inside a container (there'd be nothing to update — the image is immutable). Pull a new image instead.
+
 ## Upgrading
 
 Your inventory lives in a SQLite database file (`data/binbash.db` by default) that is completely separate from the `binbash` binary, and binbash applies any schema changes automatically the next time it starts. So upgrading is just **swapping in the new binary** — you don't export, re-import, or migrate anything by hand, and your data stays exactly where it is.
 
 **Restoring from a CSV is _not_ the upgrade path.** A CSV backup is a safety net for disaster recovery or moving to a new machine; it deliberately doesn't carry AI tags, timestamps, or internal IDs, so round-tripping your whole inventory through one would mark every item as un-tagged again (and a later AI-tag run would re-tag, and re-bill, all of it). Keep the database file in place and none of that is touched.
 
-### Before you upgrade
+### Easiest: update from inside the app
+
+Open **Settings → Check for updates**. If a newer release exists, binbash offers an **Update now** button that does the whole swap for you:
+
+1. It reminds you to download a CSV backup (one click, right there), and automatically saves a point-in-time snapshot of your database (to your `auto_backup_dir` if configured, otherwise next to the database; the newest 3 are kept).
+2. It downloads the right build for your platform from GitHub, verifies it against the release's `SHA256SUMS.txt`, and test-runs it before touching anything.
+3. It swaps the binary in place — the old one is kept alongside as `binbash.old` in case you ever want to roll back — and restarts itself. The page reloads onto the new version a few seconds later, still signed in.
+
+Requirements: the user binbash runs as must own the directory the binary lives in (the [systemd install](#running-as-a-service-systemd) above already sets that up with `chown -R`), and the server needs to reach `github.com`. In-app update isn't available on Windows or inside Docker — use the manual steps below or redeploy the image.
+
+### Manual upgrade: before you start
 
 Take a quick safety copy first, in case you ever want to roll back — schema migrations only move **forward**, so a new binary can upgrade an old database, but an old binary can't open a newer one:
 
@@ -290,7 +332,7 @@ systemctl status binbash
 journalctl -u binbash -n 20
 ```
 
-You'll see the usual `binbash listening on :8080`. Your config file and `./data` database are untouched — nothing else to change.
+You'll see the usual `binbash <version> listening on :8080`. Your config file and `./data` database are untouched — nothing else to change.
 
 ### Docker
 
@@ -313,9 +355,74 @@ Because the database lives on the mounted volume, it survives the container bein
 
 Check the logs first (`journalctl -u binbash` or `docker logs binbash`). A migration that fails is logged and stops startup rather than half-applying, so your data isn't left in a partial state. To roll back, reinstall the previous binary — and if a new migration had already run, restore the database snapshot you copied above.
 
-## Put a reverse proxy in front
+## Exposing binbash to the internet
 
-binbash only speaks plain HTTP and is protected by a single shared password. Without HTTPS, that password travels in plaintext — so **don't expose binbash directly to the internet.** Either keep it on a private/VPN-only network, or put a reverse proxy (Caddy, nginx, Traefik) in front to terminate HTTPS. Caddy in particular will get you an automatic certificate in a couple of lines.
+Running binbash on your home network needs nothing special. Putting it on a public address — so you can reach your inventory from anywhere, or share it with someone who isn't on your wifi — means it will be found and probed by strangers within hours. That's normal and fine, but it changes what you have to get right.
+
+Four steps. The first two are not optional.
+
+### 1. Terminate HTTPS with a reverse proxy
+
+binbash speaks plain HTTP. Without HTTPS in front of it, your password and session cookie cross the internet in the clear for anyone on the path to read. A reverse proxy handles this. Caddy does it in two lines and gets a certificate automatically:
+
+```
+binbash.example.com {
+	reverse_proxy 127.0.0.1:8080
+}
+```
+
+nginx and Traefik work equally well; you'll need to point them at a certificate yourself (Certbot is the usual answer).
+
+### 2. Bind binbash to localhost
+
+The proxy is useless if people can just skip it. By default binbash listens on every network interface, which on a public server means `http://your-server-ip:8080` serves your inventory over **unencrypted HTTP**, straight past the proxy you just set up. Close that door:
+
+```toml
+bind_address = "127.0.0.1"
+```
+
+Now the only way in is through the proxy. Restart binbash, then confirm from another machine that `http://your-server-ip:8080` refuses the connection. A firewall rule blocking port 8080 from outside is a good second layer.
+
+**If your proxy runs in Docker or on a different machine** than binbash, also tell binbash where it is:
+
+```toml
+trusted_proxies = ["172.17.0.0/16"]   # your proxy's address or network
+```
+
+binbash ignores "the real visitor is X" headers from anyone not on this list — that's what stops a stranger from simply claiming to be someone else to dodge the login lockout. The default covers a proxy on the same machine, which is the common case. Get this wrong and binbash will think every visitor is your proxy, which lumps everyone into one lockout bucket.
+
+### 3. Use a strong password
+
+binbash has one password and no usernames. On the internet, that password is the entire lock on your front door. Use a long random one from a password manager. Change it in **Settings → Change password** — which also signs out every other device, so it doubles as the panic button if you ever think a session leaked.
+
+### 4. Ban repeat offenders with fail2ban (optional)
+
+binbash already locks an IP out for 15 minutes after 5 wrong passwords. fail2ban goes further and drops repeat offenders at the firewall, so their traffic never reaches the app at all. Copy the two files from [`deploy/fail2ban/`](deploy/fail2ban/):
+
+```sh
+sudo cp deploy/fail2ban/binbash.conf /etc/fail2ban/filter.d/binbash.conf
+sudo cp deploy/fail2ban/jail.local   /etc/fail2ban/jail.d/binbash.local
+sudo systemctl restart fail2ban
+sudo fail2ban-client status binbash
+```
+
+Before enabling it, glance at `journalctl -u binbash | grep "auth failure"` and check the addresses look like real visitors rather than your own proxy — if they're all `127.0.0.1`, fix `trusted_proxies` first, or fail2ban will end up banning your proxy.
+
+### What binbash does for you
+
+Once it's behind HTTPS, binbash handles the rest without configuration:
+
+- **The session cookie is marked `Secure`** when you're on HTTPS, so the browser will never send it over an unencrypted connection.
+- **Login attempts are rate-limited per visitor** — 5 tries, then a 15-minute lockout — and every failure is logged with the real client IP.
+- **Changing your password signs out every other session**, so a leaked cookie can actually be revoked.
+- **Cross-site requests are rejected**, so a malicious page you happen to visit can't quietly make your browser delete a bin or wipe your inventory.
+- **Security headers** (`Content-Security-Policy`, `X-Frame-Options`, `nosniff`, `Referrer-Policy`, HSTS) are set on every response — binbash can't be framed for a clickjacking attack, and the page can't load or send anything to a third-party host.
+
+### What binbash does not do
+
+Be clear-eyed about the trade-off you're accepting: **one password, no user accounts, no two-factor.** That's a deliberate design choice for a household inventory app, and with a strong password behind HTTPS it's a reasonable one — but it is the whole security model.
+
+If you want a stronger front door without changing binbash, put an authenticating layer in front of it. A [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) with Access (free tier, emails a one-time code before anyone reaches binbash, and your server port never faces the internet at all) or [Tailscale](https://tailscale.com/) (private network, no public exposure) both work well and need no changes to binbash.
 
 ## Building from source
 

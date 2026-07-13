@@ -39,10 +39,12 @@ jobs:
           name="binbash-${VERSION}-${GOOS}-${GOARCH}"
           bin="binbash"
           [ "$GOOS" = "windows" ] && bin="binbash.exe"
-          mkdir -p "stage/${name}/deploy" dist
-          go build -trimpath -ldflags="-s -w" -o "stage/${name}/${bin}" .
+          mkdir -p "stage/${name}" dist
+          go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o "stage/${name}/${bin}" .
           cp LICENSE README.md binbash.example.toml "stage/${name}/"
-          cp deploy/binbash.service "stage/${name}/deploy/"
+          # The whole deploy directory: the systemd unit plus the fail2ban
+          # filter and jail the README's hardening guide tells people to copy.
+          cp -R deploy "stage/${name}/deploy"
           if [ "$GOOS" = "windows" ]; then
             (cd stage && zip -qr "../dist/${name}.zip" "${name}")
           else

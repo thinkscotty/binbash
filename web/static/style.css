@@ -385,6 +385,37 @@ button.danger:hover {
   font-size: 0.85rem;
 }
 
+/* Update panel on the settings page. */
+.update-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+}
+
+.update-panel p {
+  margin-top: 0;
+}
+
+.update-panel form {
+  margin-bottom: 0.75rem;
+}
+
+.update-panel a {
+  color: var(--color-accent-dark);
+}
+
+.update-hint {
+  font-size: 0.85rem;
+  margin-bottom: 0;
+}
+
+.update-success {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
 .back-link {
   display: inline-block;
   margin-top: 0.5rem;

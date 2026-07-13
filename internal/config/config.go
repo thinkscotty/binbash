@@ -8,6 +8,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -35,18 +36,28 @@ const (
 	// absence isn't an error -- pure env-var configuration, with no file at
 	// all, remains fully supported.
 	defaultConfigPath = "./binbash.toml"
+
+	// defaultBindAddress keeps binbash reachable on every interface, which is
+	// what a LAN install wants and what it has always done. On a public VPS
+	// this is the wrong answer -- it publishes the app in plaintext on
+	// http://<public-ip>:8080, straight past the HTTPS reverse proxy -- so
+	// there the operator sets bind_address to 127.0.0.1 and lets only the
+	// local proxy through.
+	defaultBindAddress = "0.0.0.0"
 )
 
 type Config struct {
-	Port          string
-	Password      string
-	DBPath        string
-	AIBaseURL     string
-	AIAPIKey      string
-	AIModel       string
-	AITagCount    int
-	AITagBreadth  string
-	AutoBackupDir string
+	Port           string
+	BindAddress    string
+	TrustedProxies []string
+	Password       string
+	DBPath         string
+	AIBaseURL      string
+	AIAPIKey       string
+	AIModel        string
+	AITagCount     int
+	AITagBreadth   string
+	AutoBackupDir  string
 }
 
 // fileConfig is the TOML file's shape. Every field is optional -- decoding
@@ -57,10 +68,16 @@ type Config struct {
 // enabled but requests zero tags).
 type fileConfig struct {
 	Port          string `toml:"port"`
+	BindAddress   string `toml:"bind_address"`
 	Password      string `toml:"password"`
 	DBPath        string `toml:"db_path"`
 	AutoBackupDir string `toml:"auto_backup_dir"`
-	AI            struct {
+	// TrustedProxies is a *[]string for the same reason TagCount is a *int:
+	// "absent from the file" (keep the loopback default) has to be
+	// distinguishable from "explicitly set to an empty list" (trust nothing,
+	// the way to opt out of X-Forwarded-* handling entirely).
+	TrustedProxies *[]string `toml:"trusted_proxies"`
+	AI             struct {
 		BaseURL    string `toml:"base_url"`
 		APIKey     string `toml:"api_key"`
 		Model      string `toml:"model"`
@@ -71,10 +88,17 @@ type fileConfig struct {
 
 func Load() (*Config, error) {
 	cfg := &Config{
-		Port:         "8080",
-		DBPath:       "./data/binbash.db",
-		AITagCount:   defaultAITagCount,
-		AITagBreadth: "moderate",
+		Port:        "8080",
+		BindAddress: defaultBindAddress,
+		// Loopback only. See auth.TrustedProxies for why this default is both
+		// safe and necessary: safe because RemoteAddr can't be forged, and
+		// necessary because the documented VPS setup puts the TLS proxy on
+		// loopback, where believing it is the only way to learn the real
+		// client's IP and scheme.
+		TrustedProxies: []string{"127.0.0.1", "::1"},
+		DBPath:         "./data/binbash.db",
+		AITagCount:     defaultAITagCount,
+		AITagBreadth:   "moderate",
 	}
 
 	path, explicit := os.LookupEnv("BINBASH_CONFIG")
@@ -94,12 +118,24 @@ func Load() (*Config, error) {
 
 	// Env vars always win, whether or not a file was loaded.
 	cfg.Port = getEnv("BINBASH_PORT", cfg.Port)
+	cfg.BindAddress = getEnv("BINBASH_BIND_ADDRESS", cfg.BindAddress)
 	cfg.Password = getEnv("BINBASH_PASSWORD", cfg.Password)
 	cfg.DBPath = getEnv("BINBASH_DB_PATH", cfg.DBPath)
 	cfg.AutoBackupDir = getEnv("BINBASH_AUTO_BACKUP_DIR", cfg.AutoBackupDir)
 	cfg.AIBaseURL = getEnv("BINBASH_AI_BASE_URL", cfg.AIBaseURL)
 	cfg.AIAPIKey = getEnv("BINBASH_AI_API_KEY", cfg.AIAPIKey)
 	cfg.AIModel = getEnv("BINBASH_AI_MODEL", cfg.AIModel)
+	if v := os.Getenv("BINBASH_TRUSTED_PROXIES"); v != "" {
+		cfg.TrustedProxies = splitList(v)
+	}
+
+	// A hostname here would be a quiet footgun: it binds to whatever the name
+	// resolves to at startup, which is not necessarily what the operator meant
+	// to expose. Requiring a literal address keeps "what am I listening on"
+	// answerable by reading the config.
+	if _, err := netip.ParseAddr(cfg.BindAddress); err != nil {
+		return nil, fmt.Errorf("bind address must be an IP address like 0.0.0.0 or 127.0.0.1, not %q", cfg.BindAddress)
+	}
 
 	if cfg.Password == "" {
 		return nil, fmt.Errorf("password must be set, via BINBASH_PASSWORD or the config file")
@@ -136,6 +172,12 @@ func applyFileConfig(cfg *Config, fc fileConfig) {
 	if fc.Port != "" {
 		cfg.Port = fc.Port
 	}
+	if fc.BindAddress != "" {
+		cfg.BindAddress = fc.BindAddress
+	}
+	if fc.TrustedProxies != nil {
+		cfg.TrustedProxies = *fc.TrustedProxies
+	}
 	if fc.Password != "" {
 		cfg.Password = fc.Password
 	}
@@ -167,4 +209,16 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// splitList parses a comma-separated env var into a list, dropping blanks so
+// that stray commas and trailing separators are harmless.
+func splitList(v string) []string {
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }

@@ -15,6 +15,21 @@ password = "changeme"
 db_path = "./data/binbash.db"
 auto_backup_dir = ""
 
+# Which network interface to listen on. The default accepts connections from
+# anywhere, which is what you want on a home network. If you're putting binbash
+# on the public internet behind a reverse proxy, set this to "127.0.0.1" so the
+# app can ONLY be reached through that proxy -- otherwise it also stays
+# reachable over plain, unencrypted HTTP on your server's public address.
+bind_address = "0.0.0.0"
+
+# Reverse proxies whose "the real visitor is X" headers binbash should believe.
+# The default covers a proxy running on the same machine, which is the usual
+# setup and needs no change. If your proxy runs elsewhere (a Docker container,
+# another server), list its address or network here -- otherwise binbash sees
+# every visitor as the proxy, and one person's failed logins lock out everyone.
+# Set to [] to trust nobody.
+trusted_proxies = ["127.0.0.1", "::1"]
+
 [ai]
 # Setting base_url is what turns AI tagging on.
 base_url = ""

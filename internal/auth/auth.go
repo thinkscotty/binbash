@@ -1,5 +1,7 @@
-// Package auth implements binbash's single-password login, session cookie
-// handling, in-app password rotation, and brute-force login throttling.
+// Package auth owns binbash's HTTP trust boundary: single-password login,
+// signed session cookies, in-app password rotation, brute-force throttling,
+// and the per-request protections (CSRF, security headers) wrapped around
+// every route by Protect.
 package auth
 
 import (
@@ -10,21 +12,24 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"fmt"
-	"net"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
+// MaxAttempts is how many failed password attempts an IP gets, within
+// ThrottleWindow, before it is locked out for LockoutDuration. Exported so the
+// auth-failure log can name the number an operator will see in their fail2ban
+// config.
+const MaxAttempts = 5
+
 const (
 	cookieName = "binbash_session"
 	sessionTTL = 30 * 24 * time.Hour
 
-	maxAttempts     = 5
 	throttleWindow  = 15 * time.Minute
 	lockoutDuration = 15 * time.Minute
 	throttleIdleTTL = time.Hour // sweep records idle longer than this
@@ -37,12 +42,17 @@ const (
 // (guarded by mu) so the hot paths -- IsAuthenticated on every request,
 // CheckPassword on login -- never need a DB round trip.
 //
-// The session-signing key is intentionally independent of the password: it
-// is generated once at bootstrap and never changes, so rotating the password
-// does not invalidate existing sessions, including the session of whoever
-// just changed it.
+// Rotating the password also rotates the session-signing key, which
+// invalidates every session signed with the old one. That is what makes
+// "change the password" a working panic button: a session cookie that leaked
+// is otherwise valid for its full 30-day life, and no amount of password
+// changing would take it away. Rotate re-issues the caller's own cookie in the
+// same response, so the person changing the password stays signed in while
+// every other device has to sign in again.
 type Auth struct {
-	db *sql.DB
+	db      *sql.DB
+	proxies *TrustedProxies
+	csrf    *http.CrossOriginProtection
 
 	mu           sync.RWMutex
 	passwordHash []byte
@@ -64,7 +74,10 @@ type attempt struct {
 // database, or one upgrading from before password rotation existed). On
 // every later run the database is the source of truth; bootstrapPassword is
 // ignored once a row exists.
-func New(db *sql.DB, bootstrapPassword string) (*Auth, error) {
+//
+// proxies decides whose X-Forwarded-* headers are believed; pass
+// DefaultTrustedProxies() for the loopback-only default.
+func New(db *sql.DB, bootstrapPassword string, proxies *TrustedProxies) (*Auth, error) {
 	hash, key, err := loadSettings(db)
 	if err != nil {
 		return nil, fmt.Errorf("load auth settings: %w", err)
@@ -76,8 +89,14 @@ func New(db *sql.DB, bootstrapPassword string) (*Auth, error) {
 		}
 	}
 
+	if proxies == nil {
+		proxies = DefaultTrustedProxies()
+	}
+
 	return &Auth{
 		db:           db,
+		proxies:      proxies,
+		csrf:         http.NewCrossOriginProtection(),
 		passwordHash: hash,
 		key:          key,
 		attempts:     make(map[string]*attempt),
@@ -130,26 +149,47 @@ func (a *Auth) CheckPassword(candidate string) bool {
 	return bcrypt.CompareHashAndPassword(hash, []byte(candidate)) == nil
 }
 
-// Rotate changes the password. The session-signing key is left untouched, so
-// existing sessions -- including the caller's own -- remain valid.
+// Rotate changes the password and, with it, the session-signing key: every
+// session issued under the old key stops validating immediately. Callers must
+// re-issue the current user's cookie with Login afterwards, or they will sign
+// themselves out along with everyone else.
+//
+// Both values move in a single UPDATE, so a failure part-way cannot leave the
+// stored hash and key disagreeing with the cached ones.
 func (a *Auth) Rotate(newPassword string) error {
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("hash new password: %w", err)
 	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return fmt.Errorf("generate session key: %w", err)
+	}
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if _, err := a.db.Exec(`UPDATE auth_settings SET password_hash = ? WHERE id = 1`, string(hash)); err != nil {
+	if _, err := a.db.Exec(
+		`UPDATE auth_settings SET password_hash = ?, session_key = ? WHERE id = 1`,
+		string(hash), base64.StdEncoding.EncodeToString(key),
+	); err != nil {
 		return err
 	}
 	a.passwordHash = hash
+	a.key = key
 	return nil
 }
 
 // Login sets a signed session cookie on the response.
-func (a *Auth) Login(w http.ResponseWriter) {
+//
+// The request is needed to decide the Secure flag: without it the browser will
+// happily send the session cookie over any plain-HTTP request to the same
+// host, which hands the session to anyone watching the network no matter how
+// well the reverse proxy terminates TLS. It cannot simply always be set --
+// browsers refuse to store a Secure cookie that arrives over HTTP, so doing
+// that unconditionally would make login silently impossible on a plain-HTTP
+// LAN install, which stays supported.
+func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	expiry := time.Now().Add(sessionTTL).Unix()
 	payload := strconv.FormatInt(expiry, 10)
 	sig := a.sign(payload)
@@ -160,18 +200,21 @@ func (a *Auth) Login(w http.ResponseWriter) {
 		Value:    value,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   a.proxies.IsHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Now().Add(sessionTTL),
 	})
 }
 
-// Logout clears the session cookie.
-func (a *Auth) Logout(w http.ResponseWriter) {
+// Logout clears the session cookie. It mirrors Login's attributes, Secure
+// included, so that the clearing cookie isn't itself rejected as insecure.
+func (a *Auth) Logout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   a.proxies.IsHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
@@ -218,34 +261,11 @@ func (a *Auth) sign(payload string) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-// Middleware redirects unauthenticated requests to /login, except for the
-// login route and static assets.
-func (a *Auth) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/login" || strings.HasPrefix(r.URL.Path, "/static/") {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		if !a.IsAuthenticated(r) {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-// ClientIP extracts the request's client address for throttle keying,
-// stripping the port. Behind a reverse proxy that doesn't forward the
-// original client address, every request will share the proxy's IP -- this
-// degrades throttling to a single shared bucket rather than defeating it.
+// ClientIP returns the address to attribute the request to -- the real client
+// behind a trusted reverse proxy, otherwise the connecting peer. See
+// TrustedProxies.
 func (a *Auth) ClientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+	return a.proxies.ClientIP(r)
 }
 
 // Throttled reports whether ip is currently locked out after too many failed
@@ -265,10 +285,13 @@ func (a *Auth) Throttled(ip string) (wait time.Duration, blocked bool) {
 }
 
 // RecordFailure counts a failed login attempt from ip, locking it out for
-// lockoutDuration once maxAttempts is reached within throttleWindow. Callers
+// lockoutDuration once MaxAttempts is reached within throttleWindow. Callers
 // should only invoke this for attempts that weren't already blocked by
 // Throttled, so a lockout in progress doesn't keep sliding its own window.
-func (a *Auth) RecordFailure(ip string) {
+//
+// It reports whether this attempt is the one that tripped the lockout, so the
+// caller can log that transition exactly once.
+func (a *Auth) RecordFailure(ip string) (lockedOut bool) {
 	a.throttleMu.Lock()
 	defer a.throttleMu.Unlock()
 	a.sweepLocked()
@@ -281,9 +304,11 @@ func (a *Auth) RecordFailure(ip string) {
 	}
 	rec.count++
 	rec.lastSeen = now
-	if rec.count >= maxAttempts {
+	if rec.count >= MaxAttempts {
 		rec.lockedUntil = now.Add(lockoutDuration)
+		return rec.count == MaxAttempts
 	}
+	return false
 }
 
 // RecordSuccess clears any throttle state for ip after a successful login.
