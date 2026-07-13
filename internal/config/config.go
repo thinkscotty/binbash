@@ -6,6 +6,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/netip"
@@ -15,21 +16,10 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/thinkscotty/binbash/internal/auth"
 )
 
-// Bootstrap password length limits. These mirror minPasswordLen/
-// maxPasswordLen in internal/handlers/validation.go, which govern in-app
-// password rotation -- duplicated here (rather than imported) to avoid the
-// config package depending on the handlers package. maxBootstrapPasswordLen
-// is bcrypt's hard limit, in bytes: bcrypt.GenerateFromPassword returns a
-// hard error above it rather than truncating, so without this check a too-long
-// BINBASH_PASSWORD would make the app fail to start with a bcrypt error deep
-// in the auth bootstrap path, with nothing telling the operator that password
-// length is the actual problem.
 const (
-	minBootstrapPasswordLen = 8
-	maxBootstrapPasswordLen = 72
-
 	defaultAITagCount = 3
 	maxAITagCount     = 8
 
@@ -146,11 +136,8 @@ func Load() (*Config, error) {
 	// benefit. auth.New raises the error if it turns out there's no account
 	// yet and nothing to create one from -- it's the only layer that knows.
 	if cfg.Password != "" {
-		if len(cfg.Password) < minBootstrapPasswordLen {
-			return nil, fmt.Errorf("password must be at least %d characters", minBootstrapPasswordLen)
-		}
-		if len(cfg.Password) > maxBootstrapPasswordLen {
-			return nil, fmt.Errorf("password must be at most %d bytes long", maxBootstrapPasswordLen)
+		if problem := auth.ValidatePassword(cfg.Password); problem != "" {
+			return nil, errors.New(problem)
 		}
 	}
 

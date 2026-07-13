@@ -28,6 +28,35 @@ import (
 // config.
 const MaxAttempts = 5
 
+// Password length limits, enforced everywhere a password can be set: the
+// bootstrap value in the config file, the in-app change form, and the
+// -reset-password command. They live here, in the package that owns passwords,
+// because three copies of "8" and "72" is three chances for one of them to
+// drift and let someone set a password that another path then rejects.
+//
+// MaxPasswordLen is bcrypt's hard limit, in bytes: GenerateFromPassword errors
+// out above it rather than truncating, so without the check a too-long password
+// surfaces as a bcrypt error from deep in the auth internals, with nothing
+// telling the operator that length was the problem.
+const (
+	MinPasswordLen = 8
+	MaxPasswordLen = 72
+)
+
+// ValidatePassword reports a human-readable problem with a proposed password,
+// or "" if it's acceptable.
+func ValidatePassword(password string) string {
+	switch {
+	case password == "":
+		return "Password is required"
+	case len(password) < MinPasswordLen:
+		return fmt.Sprintf("Password must be at least %d characters", MinPasswordLen)
+	case len(password) > MaxPasswordLen:
+		return fmt.Sprintf("Password is too long (max %d characters)", MaxPasswordLen)
+	}
+	return ""
+}
+
 const (
 	cookieName = "binbash_session"
 	sessionTTL = 30 * 24 * time.Hour
@@ -156,6 +185,50 @@ func bootstrap(db *sql.DB, password string) (hash, key []byte, err error) {
 		return nil, nil, err
 	}
 	return hash, key, nil
+}
+
+// ResetPassword sets the login password directly in the database, creating the
+// account if there isn't one yet. It is the way back in after a forgotten
+// password: binbash has no usernames and no email, so there is nobody to send a
+// reset link to, and the only authority left is whoever can reach the database
+// file on the server.
+//
+// It rotates the session-signing key too, which signs out every device. That is
+// deliberate: you are either locked out (nothing to lose) or resetting because
+// something looked wrong (in which case revoking existing sessions is the whole
+// point).
+//
+// This is a standalone function rather than a method because it runs from the
+// command line, against a database no server is serving -- and it is why the
+// caller must make sure of that. A running binbash caches the password hash and
+// session key in memory, so it would carry on honouring the old password until
+// it is restarted.
+func ResetPassword(db *sql.DB, newPassword string) error {
+	// Capitalised deliberately: unlike most Go errors this one is printed
+	// straight to a person standing at a terminal, not wrapped into a sentence.
+	if problem := ValidatePassword(newPassword); problem != "" {
+		return errors.New(problem)
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash new password: %w", err)
+	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return fmt.Errorf("generate session key: %w", err)
+	}
+
+	// Upsert: this has to work whether the account exists (the forgotten-password
+	// case) or not (a database whose auth row was cleared, or never created).
+	_, err = db.Exec(`
+		INSERT INTO auth_settings (id, password_hash, session_key) VALUES (1, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			password_hash = excluded.password_hash,
+			session_key   = excluded.session_key`,
+		string(hash), base64.StdEncoding.EncodeToString(key),
+	)
+	return err
 }
 
 // CheckPassword reports whether candidate matches the current password.

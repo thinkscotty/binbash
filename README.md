@@ -19,6 +19,7 @@ binbash is a single, self-contained binary. There's no database server to run, n
   - [Every setting](#every-setting)
   - [Overriding with environment variables](#overriding-with-environment-variables)
 - [AI tagging](#ai-tagging)
+- [Resetting a forgotten password](#resetting-a-forgotten-password)
 - [Backups](#backups)
   - [Migrating from Homebox](#migrating-from-homebox)
 - [Running as a service (systemd)](#running-as-a-service-systemd)
@@ -136,13 +137,13 @@ That password only **bootstraps** your account on first run. Change it any time 
 
 Which means that once you've signed in and set a real password in the app, **you can delete the `password` line from `binbash.toml` entirely.** binbash starts fine without it, and you're no longer keeping a plaintext password on disk that doesn't even open anything. It'll remind you of this at startup if you leave it there.
 
-> **Forgot your password?** There's no email reset — binbash has no idea who you are. To get back in, put a `password` line back in `binbash.toml`, clear the stored account, and restart:
+> **Forgot your password?** There's no email reset — binbash has no idea who you are. Instead, prove you own the server by running this on it:
 >
 > ```sh
-> sqlite3 data/binbash.db "DELETE FROM auth_settings;"
+> ./binbash -reset-password
 > ```
 >
-> binbash will bootstrap a fresh account from your config password on the next start. (This also signs out every device, which is what you want if you're doing this because something looked wrong.)
+> It asks for a new password (twice), sets it, and signs out every device. Then restart binbash so it picks the change up. See [Resetting a forgotten password](#resetting-a-forgotten-password) for the details.
 
 ## Configuration
 
@@ -241,6 +242,31 @@ AI tagging is optional and off until you set `[ai].base_url` (plus `api_key` and
 Once an item is successfully tagged it's skipped by future runs. An item whose response came back with no usable tags is left untagged so a later run retries it, rather than being marked done with nothing. Click the button again to work through a larger backlog in batches of 25.
 
 Any OpenAI-compatible endpoint works, including reasoning models (Qwen3, DeepSeek-R1, and the like). Those spend part of their reply "thinking" before answering, so binbash requests a generous token budget to let them finish and still return usable tags.
+
+## Resetting a forgotten password
+
+binbash has no usernames and no email address, so there's no "forgot password" link to click — there'd be nobody to send it to. Instead, the proof that you're the owner is that **you can get to the server**. Run this on the machine binbash runs on:
+
+```sh
+./binbash -reset-password
+```
+
+It asks for a new password twice, sets it, and signs out every device that was logged in. Then restart binbash — until you do, the running copy still has the old password held in memory:
+
+```sh
+sudo systemctl restart binbash
+```
+
+Two things to know:
+
+- **Run it as the same user binbash runs as.** On a systemd install that's the `binbash` user, so use `sudo -u binbash ./binbash -reset-password`. If you run it as root by mistake it will stop and tell you, rather than leaving root-owned files behind that binbash itself then can't write.
+- It works on a brand-new install too, creating the account — so it's also a way to set the first password without ever putting one in the config file.
+
+To script it (in a container, say), pipe the new password in:
+
+```sh
+echo 'a-new-strong-password' | ./binbash -reset-password
+```
 
 ## Backups
 

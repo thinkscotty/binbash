@@ -3,6 +3,8 @@ package handlers
 import (
 	"fmt"
 	"unicode/utf8"
+
+	"github.com/thinkscotty/binbash/internal/auth"
 )
 
 // Field length limits keep oversized input from bloating the database (which
@@ -15,8 +17,6 @@ const (
 	maxDescriptionLen = 2000
 	maxKeywordsLen    = 500
 	maxSearchLen      = 200
-	minPasswordLen    = 8
-	maxPasswordLen    = 72 // bcrypt's hard limit, in bytes
 )
 
 // tooLong reports whether s exceeds max runes.
@@ -103,10 +103,10 @@ func validatePasswordChange(currentOK bool, newPassword, confirm string) string 
 		return "Current password is incorrect"
 	case newPassword == "":
 		return "New password is required"
-	case len(newPassword) < minPasswordLen:
-		return fmt.Sprintf("New password must be at least %d characters", minPasswordLen)
-	case len(newPassword) > maxPasswordLen:
-		return fmt.Sprintf("New password is too long (max %d characters)", maxPasswordLen)
+	case len(newPassword) < auth.MinPasswordLen:
+		return fmt.Sprintf("New password must be at least %d characters", auth.MinPasswordLen)
+	case len(newPassword) > auth.MaxPasswordLen:
+		return fmt.Sprintf("New password is too long (max %d characters)", auth.MaxPasswordLen)
 	case newPassword != confirm:
 		return "New password and confirmation don't match"
 	}

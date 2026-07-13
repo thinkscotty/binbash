@@ -77,6 +77,16 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
+	// Needs the config (for the database path) but must not start a server:
+	// it writes to the database directly, and then exits.
+	if len(os.Args) > 1 && (os.Args[1] == "-reset-password" || os.Args[1] == "--reset-password") {
+		if err := resetPassword(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "\n%v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
 		log.Fatalf("database: %v", err)

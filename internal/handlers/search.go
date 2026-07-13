@@ -82,7 +82,7 @@ func (h *Handlers) Search(w http.ResponseWriter, r *http.Request) {
 // FTS5 query-language operators (leading '-' is NOT, an unescaped '"' breaks
 // the string, etc). Tokens are implicitly AND'd. Returns "" when there's
 // nothing to search — callers must skip the query entirely then, since
-// MATCH '' is a syntax error, not zero results.
+// MATCH ” is a syntax error, not zero results.
 func buildFTSQuery(raw string) string {
 	fields := strings.Fields(raw)
 	if len(fields) == 0 {

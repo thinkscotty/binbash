@@ -114,6 +114,81 @@ func TestBootstrapPasswordLifecycle(t *testing.T) {
 	})
 }
 
+// TestResetPassword covers `binbash -reset-password`, the only route back in
+// after a forgotten password.
+func TestResetPassword(t *testing.T) {
+	openDB := func(t *testing.T, dir string) *sql.DB {
+		t.Helper()
+		database, err := db.Open(filepath.Join(dir, "test.db"))
+		if err != nil {
+			t.Fatalf("open db: %v", err)
+		}
+		t.Cleanup(func() { database.Close() })
+		return database
+	}
+
+	t.Run("resets a forgotten password", func(t *testing.T) {
+		dir := t.TempDir()
+		a, err := New(openDB(t, dir), "the-forgotten-one", DefaultTrustedProxies())
+		if err != nil {
+			t.Fatalf("new: %v", err)
+		}
+
+		// A device signed in before the reset. Whoever is resetting has lost
+		// control of the account, so this session must not survive.
+		w := httptest.NewRecorder()
+		a.Login(w, httptest.NewRequest(http.MethodPost, "/login", nil))
+		stale := httptest.NewRequest(http.MethodGet, "/", nil)
+		stale.AddCookie(sessionCookie(t, w.Result().Cookies()))
+		if !a.IsAuthenticated(stale) {
+			t.Fatal("session should be valid before the reset")
+		}
+
+		if err := ResetPassword(openDB(t, dir), "recovered-password"); err != nil {
+			t.Fatalf("reset: %v", err)
+		}
+
+		// The reset is written straight to the database, so it only takes hold
+		// on the next start -- which is exactly why the command tells the user
+		// to restart binbash.
+		restarted, err := New(openDB(t, dir), "", DefaultTrustedProxies())
+		if err != nil {
+			t.Fatalf("new after reset: %v", err)
+		}
+		if !restarted.CheckPassword("recovered-password") {
+			t.Error("the new password does not work after a reset")
+		}
+		if restarted.CheckPassword("the-forgotten-one") {
+			t.Error("the old password still works after a reset")
+		}
+		if restarted.IsAuthenticated(stale) {
+			t.Error("a session from before the reset is still valid — a reset must sign every device out")
+		}
+	})
+
+	t.Run("creates the account when there isn't one", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := ResetPassword(openDB(t, dir), "brand-new-password"); err != nil {
+			t.Fatalf("reset on an empty database: %v", err)
+		}
+
+		a, err := New(openDB(t, dir), "", DefaultTrustedProxies())
+		if err != nil {
+			t.Fatalf("new: %v", err)
+		}
+		if !a.CheckPassword("brand-new-password") {
+			t.Error("the password set on an empty database does not work")
+		}
+	})
+
+	t.Run("rejects a password the app itself would refuse", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := ResetPassword(openDB(t, dir), "short"); err == nil {
+			t.Error("a too-short password was accepted — the reset path must enforce the same rule as the login and change-password paths, or it can set a password the app then rejects")
+		}
+	})
+}
+
 func TestParseTrustedProxies(t *testing.T) {
 	tests := []struct {
 		name    string
