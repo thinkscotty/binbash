@@ -135,7 +135,7 @@ func New(db *sql.DB, bootstrapPassword string, proxies *TrustedProxies) (*Auth, 
 		log.Printf("created your binbash account from the configured password")
 
 	case bootstrapPassword != "":
-		log.Printf("note: binbash already has an account, so the password in your config is not used — the one you set in the app is. You can delete it from the config file (see the README if you ever need to reset a forgotten password)")
+		log.Printf("note: binbash already has an account, so the password in your config is not used — the one you set in the app is. You can delete it from the config file (if you ever forget your password, run binbash -reset-password)")
 	}
 
 	if proxies == nil {
