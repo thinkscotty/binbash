@@ -184,6 +184,8 @@ Once an item is successfully tagged it's skipped by future runs. An item whose r
 
 Any OpenAI-compatible endpoint works, including reasoning models (Qwen3, DeepSeek-R1, and the like). Those spend part of their reply "thinking" before answering, so binbash requests a generous token budget to let them finish and still return usable tags.
 
+If the suggestions aren't quite to your taste — you want British *and* American spellings, or single words only, or no broad categories — you can tell the AI so in your own words with `tag_prompt`. See [Customizing the tagging prompt](README_ADVANCED.md#customizing-the-tagging-prompt).
+
 ## Backups
 
 Visit **Backup** in the nav to download a CSV of your whole inventory (one row per item, with its bin's name, category, and description), or to import a CSV back in. Importing adds to what you already have by default; check **Replace existing inventory** to wipe and reload from the file instead. The search page nudges you to back up once you've added 50+ items since the last one.

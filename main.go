@@ -129,7 +129,11 @@ func main() {
 	if cfg.AIEnabled() {
 		aiClient = ai.New(cfg.AIBaseURL, cfg.AIAPIKey, cfg.AIModel)
 	}
-	h := handlers.New(database, a, templates, cfg.AutoBackupDir, aiClient, cfg.AITagCount, cfg.AITagBreadth)
+	h := handlers.New(database, a, templates, cfg.AutoBackupDir, aiClient, ai.TagOptions{
+		Count:       cfg.AITagCount,
+		Breadth:     cfg.AITagBreadth,
+		ExtraPrompt: cfg.AITagPrompt,
+	})
 
 	// The executable path is resolved now, at startup, because a self-update
 	// renames the running binary's inode aside — after that, /proc/self/exe

@@ -48,6 +48,7 @@ type Config struct {
 	AIModel        string
 	AITagCount     int
 	AITagBreadth   string
+	AITagPrompt    string
 	AutoBackupDir  string
 }
 
@@ -74,6 +75,7 @@ type fileConfig struct {
 		Model      string `toml:"model"`
 		TagCount   *int   `toml:"tag_count"`
 		TagBreadth string `toml:"tag_breadth"`
+		TagPrompt  string `toml:"tag_prompt"`
 	} `toml:"ai"`
 }
 
@@ -117,6 +119,7 @@ func Load() (*Config, error) {
 	cfg.AIBaseURL = getEnv("BINBASH_AI_BASE_URL", cfg.AIBaseURL)
 	cfg.AIAPIKey = getEnv("BINBASH_AI_API_KEY", cfg.AIAPIKey)
 	cfg.AIModel = getEnv("BINBASH_AI_MODEL", cfg.AIModel)
+	cfg.AITagPrompt = getEnv("BINBASH_AI_TAG_PROMPT", cfg.AITagPrompt)
 	if v := os.Getenv("BINBASH_TRUSTED_PROXIES"); v != "" {
 		cfg.TrustedProxies = splitList(v)
 	}
@@ -225,6 +228,9 @@ func applyFileConfig(cfg *Config, fc fileConfig) {
 	}
 	if fc.AI.TagBreadth != "" {
 		cfg.AITagBreadth = fc.AI.TagBreadth
+	}
+	if fc.AI.TagPrompt != "" {
+		cfg.AITagPrompt = fc.AI.TagPrompt
 	}
 }
 

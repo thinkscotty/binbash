@@ -26,8 +26,7 @@ type Handlers struct {
 	Templates     Templates
 	AutoBackupDir string
 	AI            *ai.Client // nil when AI tagging is disabled
-	AITagCount    int
-	AITagBreadth  string
+	AITagOptions  ai.TagOptions
 
 	// Updater and RequestRestart back the settings page's self-update flow;
 	// main assigns them after New. RequestRestart asks main to gracefully
@@ -51,10 +50,10 @@ type Handlers struct {
 	aiTagMu sync.Mutex
 }
 
-func New(db *sql.DB, a *auth.Auth, templates Templates, autoBackupDir string, aiClient *ai.Client, aiTagCount int, aiTagBreadth string) *Handlers {
+func New(db *sql.DB, a *auth.Auth, templates Templates, autoBackupDir string, aiClient *ai.Client, aiTagOptions ai.TagOptions) *Handlers {
 	return &Handlers{
 		DB: db, Auth: a, Templates: templates, AutoBackupDir: autoBackupDir,
-		AI: aiClient, AITagCount: aiTagCount, AITagBreadth: aiTagBreadth,
+		AI: aiClient, AITagOptions: aiTagOptions,
 	}
 }
 

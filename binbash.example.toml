@@ -50,3 +50,14 @@ api_key = ""
 model = ""
 tag_count = 3
 tag_breadth = "moderate"
+
+# Extra instructions for the AI, in your own words. Optional -- leave it out and
+# the built-in prompt is used as-is. What you write here is added to the end of
+# that prompt and takes priority over it, so you can override the defaults
+# rather than only add to them. The triple quotes let it run over several lines.
+#
+# tag_prompt = """
+# Use British spellings, and add the American spelling as a separate tag.
+# Do not suggest broad categories -- only specific names for the thing itself.
+# Every tag must be a single word.
+# """

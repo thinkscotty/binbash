@@ -94,7 +94,7 @@ func (h *Handlers) TagItems(w http.ResponseWriter, r *http.Request) {
 			BinName:          it.binName,
 			BinCategory:      it.binCategory,
 			BinDescription:   it.binDescription,
-		}, h.AITagCount, h.AITagBreadth)
+		}, h.AITagOptions)
 		if err != nil {
 			log.Printf("ai tag item %d: %v", it.id, err)
 			failed++
@@ -104,7 +104,7 @@ func (h *Handlers) TagItems(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
-		if len(tags) == 0 && h.AITagCount > 0 {
+		if len(tags) == 0 && h.AITagOptions.Count > 0 {
 			// A successful call that yielded no usable tags -- typically a
 			// reasoning model that spent its whole token budget thinking and
 			// never emitted the answer (empty content). Leave the item

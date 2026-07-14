@@ -7,6 +7,7 @@ Everything that most people running binbash on a home network will never need. S
 - [Verifying a download](#verifying-a-download)
 - [Every setting](#every-setting)
 - [Environment variables](#environment-variables)
+- [Customizing the tagging prompt](#customizing-the-tagging-prompt)
 - [Running with Docker](#running-with-docker)
 - [Resetting a forgotten password](#resetting-a-forgotten-password)
 - [Migrating from Homebox](#migrating-from-homebox)
@@ -44,6 +45,7 @@ You want to see `OK` next to the file you downloaded. It's worth doing this befo
 | `model` | yes | *(empty)* | Model name to request. |
 | `tag_count` | yes | `3` | Max AI-suggested tags per item (`0`–`8`; `0` keeps the feature on but generates no tags). |
 | `tag_breadth` | yes | `moderate` | How closely related suggested tags should be: `narrow`, `moderate`, or `broad`. |
+| `tag_prompt` | yes | *(empty)* | Extra instructions for the AI, in your own words, added to the end of the built-in prompt. See [Customizing the tagging prompt](#customizing-the-tagging-prompt). |
 
 ## Environment variables
 
@@ -63,10 +65,40 @@ Every setting also has a `BINBASH_*` environment variable, and **environment var
 | `BINBASH_AI_MODEL` | `[ai].model` |
 | `BINBASH_AI_TAG_COUNT` | `[ai].tag_count` |
 | `BINBASH_AI_TAG_BREADTH` | `[ai].tag_breadth` |
+| `BINBASH_AI_TAG_PROMPT` | `[ai].tag_prompt` |
 
 You can run binbash with **no config file at all** and configure it entirely through these variables if you prefer — the file is the recommended path, not a required one.
 
 The sample systemd unit at [`deploy/binbash.service`](deploy/binbash.service) references an optional `/opt/binbash/.env` for exactly this. You don't need it when you configure via the TOML file — it's there if you'd rather set a `BINBASH_*` variable or two (for example, keeping the password out of the config file and passing it as `BINBASH_PASSWORD=...`). The unit starts fine whether or not the file exists.
+
+## Customizing the tagging prompt
+
+binbash ships with a prompt that asks for search-friendly keywords and tells the AI *not* to simply echo words already in the item's name. `tag_count` and `tag_breadth` tune it, but if you want something they don't cover, `tag_prompt` lets you say so in plain language:
+
+```toml
+[ai]
+base_url = "https://api.openai.com/v1"
+api_key  = "sk-..."
+model    = "gpt-4o-mini"
+
+tag_prompt = """
+Use British spellings, and add the American spelling as a separate tag.
+Do not suggest broad categories -- only specific names for the thing itself.
+Every tag must be a single word.
+"""
+```
+
+TOML's triple quotes (`"""`) let the value run over several lines. One instruction per line reads well to a model and to you.
+
+Your instructions are **added to the end** of the built-in prompt and declared to take priority over it, so you can contradict the defaults, not just add to them — "no broad categories" really does override the built-in guidance to suggest a category. `tag_count` and `tag_breadth` keep working alongside it.
+
+The one thing you can't override is the response format: binbash needs a plain comma-separated list back, so that instruction always applies. (Without that guarantee, a prompt that talked the model into writing sentences wouldn't give you differently-styled tags, it would give you tags like `Sure` and `here are three keywords`.)
+
+Some things worth knowing:
+
+- **Changes need a restart.** The prompt is read from the config at startup, like every other setting.
+- **Only newly-tagged items are affected.** Items already marked AI-tagged are skipped by future runs, so a new prompt applies to the backlog and to items you add from now on — it doesn't retroactively re-tag anything.
+- **Try it on a few items first.** Tag one batch, look at what you got, and adjust. Since tags are only ever *appended* to an item's keywords, a prompt that produces junk means editing those items to clean them up rather than a single undo.
 
 ## Running with Docker
 

@@ -55,6 +55,15 @@ type ItemContext struct {
 	BinDescription   string
 }
 
+// TagOptions shapes a tagging request. Count and Breadth come from the [ai]
+// table in the config file; ExtraPrompt is the optional tag_prompt, free-text
+// instructions appended to the built-in system prompt (see systemPrompt).
+type TagOptions struct {
+	Count       int
+	Breadth     string
+	ExtraPrompt string
+}
+
 type chatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -76,19 +85,17 @@ type chatResponse struct {
 	} `json:"error"`
 }
 
-// TagItem asks the configured endpoint for up to tagCount keyword tags for
-// item, with breadth ("narrow", "moderate", or "broad") shaping how closely
-// related the suggestions should be. Returns nil, nil without making a
-// request when tagCount is 0.
-func (c *Client) TagItem(ctx context.Context, item ItemContext, tagCount int, breadth string) ([]string, error) {
-	if tagCount == 0 {
+// TagItem asks the configured endpoint for up to opts.Count keyword tags for
+// item. Returns nil, nil without making a request when opts.Count is 0.
+func (c *Client) TagItem(ctx context.Context, item ItemContext, opts TagOptions) ([]string, error) {
+	if opts.Count == 0 {
 		return nil, nil
 	}
 
 	reqBody := chatRequest{
 		Model: c.model,
 		Messages: []chatMessage{
-			{Role: "system", Content: systemPrompt(tagCount, breadth)},
+			{Role: "system", Content: systemPrompt(opts)},
 			{Role: "user", Content: userPrompt(item)},
 		},
 		Temperature: 0.3,
@@ -131,7 +138,7 @@ func (c *Client) TagItem(ctx context.Context, item ItemContext, tagCount int, br
 		return nil, fmt.Errorf("AI provider returned no choices")
 	}
 
-	return parseTags(parsed.Choices[0].Message.Content, tagCount), nil
+	return parseTags(parsed.Choices[0].Message.Content, opts.Count), nil
 }
 
 // parseTags splits a model reply into individual tags, tolerating commas or
@@ -155,7 +162,7 @@ func parseTags(content string, max int) []string {
 	return tags
 }
 
-func systemPrompt(tagCount int, breadth string) string {
+func systemPrompt(opts TagOptions) string {
 	// example pairs each breadth with a one-shot demonstration for the same
 	// input ("London Lego Set"), so the model sees not just an instruction but
 	// a worked example of expanding *beyond* the item's own name at the right
@@ -163,7 +170,7 @@ func systemPrompt(tagCount int, breadth string) string {
 	// difference between the levels legible: narrow stays on alternate names,
 	// broad reaches out to themes and use cases.
 	var guidance, example string
-	switch breadth {
+	switch opts.Breadth {
 	case "narrow":
 		guidance = "Suggest only close synonyms and alternate names for the item — nothing broader."
 		example = "building blocks, brick set, construction toy"
@@ -174,13 +181,30 @@ func systemPrompt(tagCount int, breadth string) string {
 		guidance = "Suggest close synonyms, alternate names, and the item's general category."
 		example = "toys, bricks, travel"
 	}
-	return fmt.Sprintf(
+	prompt := fmt.Sprintf(
 		"You are a tagging assistant for a home inventory app. Given an item's details, suggest up to %d short search keywords/tags that help someone find this item later by typing a RELATED term. %s "+
 			"Do not simply repeat words that already appear in the item's name or its existing keywords — those are already searchable. Instead suggest terms the item could ALSO be found by: its category, material, purpose, or theme. "+
 			"For example, for an item named \"London Lego Set\", good tags would be: %s. "+
 			"Respond with ONLY a comma-separated list of tags and nothing else — no explanation, no numbering. If you have no useful tags to add, respond with an empty string.",
-		tagCount, guidance, example,
+		opts.Count, guidance, example,
 	)
+
+	// The operator's own instructions go last and are declared to win any
+	// conflict, because the useful ones usually *do* conflict: "no categories"
+	// contradicts the category guidance above, and a house style ("British
+	// spellings", "single words only") narrows what the example demonstrates.
+	// Appending without settling precedence would leave the model holding two
+	// opposing instructions and picking one at random.
+	//
+	// The response format is deliberately excluded from that override. It isn't
+	// a matter of taste -- parseTags splits the reply on commas, so a prompt
+	// that talks the model into prose or numbered lists doesn't produce
+	// differently-styled tags, it produces garbage tags ("Sure", "here are 3
+	// keywords") that look like a binbash bug rather than a config mistake.
+	if extra := strings.TrimSpace(opts.ExtraPrompt); extra != "" {
+		prompt += "\n\nAdditional instructions from the owner of this inventory. Where they conflict with anything above, follow these instead — with one exception: the response format above (a plain comma-separated list, nothing else) always applies and cannot be overridden.\n\n" + extra
+	}
+	return prompt
 }
 
 func userPrompt(item ItemContext) string {
