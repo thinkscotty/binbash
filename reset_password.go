@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"os/user"
-	"strconv"
 	"strings"
 
 	"github.com/thinkscotty/binbash/internal/auth"
@@ -25,7 +23,7 @@ import (
 // notice below: a running binbash holds the password hash and session key in
 // memory and would go on honouring the old password until restarted.
 func resetPassword(cfg *config.Config) error {
-	if err := checkDBOwnership(cfg.DBPath); err != nil {
+	if err := checkResetOwnership(cfg.DBPath); err != nil {
 		return err
 	}
 
@@ -52,48 +50,6 @@ func resetPassword(cfg *config.Config) error {
 	fmt.Println("copy still has the old password held in memory:")
 	fmt.Println("\n    sudo systemctl restart binbash")
 	return nil
-}
-
-// checkDBOwnership refuses to touch a database belonging to another user.
-//
-// The trap this exists for: on a systemd install the service runs as `binbash`
-// and owns /opt/binbash/data. Someone locked out will very reasonably reach for
-// `sudo ./binbash -reset-password` -- and SQLite would then create root-owned
-// -wal and -shm files alongside the database, which the service user cannot
-// write. The password reset would appear to work and the app would then fail to
-// start, which is a far worse place to be than merely locked out.
-func checkDBOwnership(path string) error {
-	owner, ok := fileOwner(path)
-	if !ok {
-		return nil // no database yet, or a platform without uids
-	}
-	if owner == currentUID() {
-		return nil
-	}
-
-	name := strconv.Itoa(owner)
-	if u, err := user.LookupId(name); err == nil {
-		name = u.Username
-	}
-
-	exe, err := os.Executable()
-	if err != nil {
-		exe = "./binbash"
-	}
-
-	return fmt.Errorf(
-		"the database at %s belongs to the user %q, but this command is running as %q.\n\n"+
-			"Resetting the password as the wrong user would leave files that binbash itself\n"+
-			"can no longer write, so it has not been touched. Run it as %[2]q instead:\n\n"+
-			"    sudo -u %[2]s %s -reset-password",
-		path, name, currentUsername(), exe)
-}
-
-func currentUsername() string {
-	if u, err := user.Current(); err == nil {
-		return u.Username
-	}
-	return strconv.Itoa(currentUID())
 }
 
 // readNewPassword prompts twice on a terminal (a typo here would lock the user
