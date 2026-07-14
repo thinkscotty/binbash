@@ -8,9 +8,7 @@
 /binbash
 /dist/
 
-# Planning/reference docs kept local-only, not published to GitHub
-/PLAN.md
-/ARCHITECTURE.md
-/binbash_initial_idea.md
+# Internal docs kept local-only, not published to GitHub. README.md is the
+# only documentation that ships with the repo.
+/internal_docs/
 /CLAUDE.md
-/security-hardening.md
