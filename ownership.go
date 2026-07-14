@@ -19,9 +19,9 @@ import (
 // So both entry points that touch the database check first, and say plainly
 // which file belongs to whom.
 
-// dataPaths lists the files whose ownership decides whether binbash can use
-// its database. The directory comes first and matters most: a data directory
-// owned by another user at mode 0700 cannot even be traversed, which makes the
+// dbPaths lists the files whose ownership decides whether binbash can use its
+// database. The directory comes first and matters most: a data directory owned
+// by another user at mode 0700 cannot even be traversed, which makes the
 // database inside it unstattable and would leave a file-only check reporting
 // that all is well.
 //
@@ -29,7 +29,7 @@ import (
 // open: a root-run binbash against a binbash-owned database still leaves
 // root-owned -wal and -shm files behind, and the service breaks on its next
 // write rather than at startup.
-func dataPaths(dbPath string) []string {
+func dbPaths(dbPath string) []string {
 	return []string{
 		filepath.Dir(dbPath),
 		dbPath,
@@ -38,15 +38,15 @@ func dataPaths(dbPath string) []string {
 	}
 }
 
-// foreignOwner returns the first of binbash's data paths that belongs to a
-// user other than the one running this process, along with that user's name.
+// foreignOwner returns the first of the given paths that belongs to a user
+// other than the one running this process, along with that user's name.
 //
 // A path that doesn't exist yet, or a platform without uids, is not a problem:
 // fileOwner reports !ok and it is skipped. First run and Windows therefore pass
 // straight through.
-func foreignOwner(dbPath string) (path, owner string, found bool) {
+func foreignOwner(paths []string) (path, owner string, found bool) {
 	me := currentUID()
-	for _, p := range dataPaths(dbPath) {
+	for _, p := range paths {
 		uid, ok := fileOwner(p)
 		if !ok || uid == me {
 			continue
@@ -56,26 +56,42 @@ func foreignOwner(dbPath string) (path, owner string, found bool) {
 	return "", "", false
 }
 
-// checkDataOwnership stops the server before it opens a database it cannot
-// actually use, and tells the operator how to hand the files back.
-func checkDataOwnership(dbPath string) error {
-	path, owner, found := foreignOwner(dbPath)
+// checkDataOwnership stops the server before it opens files it cannot actually
+// use, and tells the operator how to hand them back.
+//
+// The auto-backup directory is checked alongside the database because the
+// startup handling of it -- MkdirAll, then RestrictPermissions -- cannot notice
+// this: MkdirAll is a no-op on a directory that already exists, and
+// RestrictPermissions returns happily once the mode is private without ever
+// asking whose privacy it is. A root-owned 0700 backup directory therefore
+// sails through startup and only surfaces later, when the pre-update snapshot
+// cannot be written and the update refuses to run -- which is a wretched moment
+// to discover it.
+func checkDataOwnership(dbPath, backupDir string) error {
+	paths := dbPaths(dbPath)
+	if backupDir != "" {
+		paths = append(paths, backupDir)
+	}
+
+	path, owner, found := foreignOwner(paths)
 	if !found {
 		return nil
 	}
 
-	// Recursive, and on the directory rather than the offending path, because
-	// the cause is always the same -- a root-run binbash -- and it never leaves
-	// exactly one file behind. Fixing the whole directory in one command also
-	// spares the operator a second round of this error for the sidecar it
-	// didn't mention.
-	dir := filepath.Dir(dbPath)
+	// The remedy is recursive and aimed at the directory, not the one path we
+	// happened to name: a root-run binbash never leaves exactly one file
+	// behind, and fixing the whole directory in one command spares the operator
+	// a second round of this error for the sidecar we didn't mention.
+	dir := path
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		dir = filepath.Dir(path)
+	}
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
 
 	return fmt.Errorf(
-		"%s belongs to the user %q, but binbash is running as %q, so it cannot open its database.\n\n"+
+		"binbash cannot use %s: it belongs to the user %q, but binbash is running as %q.\n\n"+
 			"This usually means binbash was started once with sudo, which created these files as root.\n"+
 			"Hand them back to the user binbash runs as:\n\n"+
 			"    sudo chown -R %s %s",
@@ -91,7 +107,9 @@ func checkDataOwnership(dbPath string) error {
 // then fail to start, which is a considerably worse place to be than merely
 // locked out.
 func checkResetOwnership(dbPath string) error {
-	path, owner, found := foreignOwner(dbPath)
+	// Database paths only: this command writes to the database and nothing
+	// else, so a backup directory it will never touch is none of its business.
+	path, owner, found := foreignOwner(dbPaths(dbPath))
 	if !found {
 		return nil
 	}

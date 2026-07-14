@@ -90,7 +90,7 @@ func main() {
 	// Before db.Open, because SQLite reports a permission problem it cannot
 	// explain -- "unable to open database file (14)" -- and the operator is
 	// left guessing. This says whose files they are and how to hand them back.
-	if err := checkDataOwnership(cfg.DBPath); err != nil {
+	if err := checkDataOwnership(cfg.DBPath, cfg.AutoBackupDir); err != nil {
 		log.Fatal(err)
 	}
 
