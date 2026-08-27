@@ -453,7 +453,7 @@ Everything is in `./data` on the host, mounted into the container at `/data`:
 
 ### Changing other settings
 
-Anything in [Every setting](#every-setting) works here — add it to the `environment:` block in `compose.yaml` as its `BINBASH_*` variable. AI tagging, for example:
+Anything in [Every setting](#every-setting) works here — add it to the `environment:` block in `compose.yaml` as its `BINBASH_*` variable. [Settings reference](#settings-reference) below names every one of them. AI tagging, for example:
 
 ```yaml
 environment:
@@ -531,6 +531,90 @@ docker compose up -d --build
 ```
 
 Leave `BINBASH_PASSWORD` out of `.env` — your account and its hashed password are already in the database, and binbash only reads that variable when there's no account yet.
+
+### Settings reference
+
+Every setting binbash has takes a `BINBASH_*` environment variable, and that's how you configure a container. Before the table, one thing that trips people up:
+
+- **`compose.yaml` decides what binbash actually receives.** Only the variables listed in its `environment:` block are passed into the container.
+- **`.env` does not reach binbash.** Compose reads it to fill in the `${...}` placeholders *inside* `compose.yaml`. Adding `BINBASH_AI_MODEL=gpt-4o-mini` to `.env` on its own does nothing at all — there's no placeholder for it to fill.
+
+So a setting is switched on in `compose.yaml`, under `environment:`. You can write the value there directly; the `${...}` form is for values you'd rather keep in `.env`, like an API key. Out of the box binbash receives four variables — `TZ`, `BINBASH_PASSWORD`, `BINBASH_AUTO_BACKUP_DIR` and `BINBASH_DB_PATH` — and everything below is opt-in.
+
+| Config file | Docker variable | Notes |
+|---|---|---|
+| `password` | `BINBASH_PASSWORD` | Already wired up. First start only; delete it once you've logged in. |
+| `db_path` | `BINBASH_DB_PATH` | Set to `/data/binbash.db` in the `Dockerfile`. Leave it alone — it's what puts your database in the bind mount. |
+| `auto_backup_dir` | `BINBASH_AUTO_BACKUP_DIR` | Already set to `/data/backups`. Keep it under `/data` or the backups vanish with the container. |
+| `trusted_proxies` | `BINBASH_TRUSTED_PROXIES` | Comma-separated. Needed if your reverse proxy is another container — see [Putting a reverse proxy in front](#putting-a-reverse-proxy-in-front). |
+| `port` | `BINBASH_PORT` | **Don't set this in `environment:`.** See [Variables that aren't binbash settings](#variables-that-arent-binbash-settings) below. |
+| `bind_address` | `BINBASH_BIND_ADDRESS` | **Leave unset.** Inside a container `127.0.0.1` means the container itself, so Docker's port publishing stops working. |
+| `[ai] base_url` | `BINBASH_AI_BASE_URL` | Setting this is what turns AI tagging on. Include the path prefix, e.g. `https://api.openai.com/v1`. |
+| `[ai] api_key` | `BINBASH_AI_API_KEY` | Use the `${...}` form so the key lives in `.env`, not in a file you might commit. |
+| `[ai] model` | `BINBASH_AI_MODEL` | e.g. `gpt-4o-mini`. |
+| `[ai] tag_count` | `BINBASH_AI_TAG_COUNT` | `0`–`8`. Default `3`. |
+| `[ai] tag_breadth` | `BINBASH_AI_TAG_BREADTH` | `narrow`, `moderate` or `broad`. Default `moderate`. |
+| `[ai] tag_prompt` | `BINBASH_AI_TAG_PROMPT` | Your own instructions, added to the built-in prompt. Multi-line works — see the YAML block style below. |
+| `[color_tags] enabled` | `BINBASH_COLOR_TAGS` | `true` or `false`. Anything else and binbash refuses to start rather than quietly defaulting. |
+| `[color_tags] label` | `BINBASH_COLOR_TAGS_LABEL` | What the field is called on the item form — `Bag`, `Owner`, `Room`. Max 30 characters. |
+| *(not in the file)* | `BINBASH_CONFIG` | Path to a config file. Only relevant if you mount a `binbash.toml`. |
+
+#### AI tagging in a container
+
+`compose.yaml` already ships the first three lines commented out. Uncomment them and add whichever of the rest you want:
+
+```yaml
+environment:
+  BINBASH_AI_BASE_URL: https://api.openai.com/v1
+  BINBASH_AI_API_KEY: ${BINBASH_AI_API_KEY:-}
+  BINBASH_AI_MODEL: gpt-4o-mini
+  BINBASH_AI_TAG_COUNT: "4"
+  BINBASH_AI_TAG_BREADTH: narrow
+```
+
+Then in `.env`:
+
+```sh
+BINBASH_AI_API_KEY=sk-...
+```
+
+Two YAML details worth knowing. Quote anything that isn't obviously text (`"4"`), so it reaches binbash as the literal characters it expects rather than as whatever YAML decides the value's type is. And a multi-line prompt uses a block scalar:
+
+```yaml
+environment:
+  BINBASH_AI_TAG_PROMPT: |
+    Use British spellings, and add the American spelling as a separate tag.
+    Every tag must be a single word.
+```
+
+That's the same thing TOML's `"""` does in [Customizing the tagging prompt](#customizing-the-tagging-prompt), and it behaves identically — your instructions are appended to the built-in prompt and take priority over it.
+
+#### Color tags in a container
+
+```yaml
+environment:
+  BINBASH_COLOR_TAGS: "true"
+  BINBASH_COLOR_TAGS_LABEL: Bag
+```
+
+Quote `"true"` as well — unquoted, YAML reads it as a boolean, and how Compose handles that has changed between versions. Quoted, it behaves the same everywhere. (binbash accepts `true`/`false`; give it anything else and it refuses to start and says so, rather than quietly falling back to off.)
+
+Apply either change with `docker compose up -d`. No rebuild is needed; Compose notices the difference and recreates the container, and your data is untouched.
+
+#### Variables that aren't binbash settings
+
+Four of the six entries in `.env.example` never reach binbash at all. They configure Compose itself, and passing them through to the app would break things:
+
+| Variable | What it actually does |
+|---|---|
+| `PUID` / `PGID` | Fills in `user:` in `compose.yaml` — the uid:gid the container runs as. |
+| `BINBASH_PORT` | Fills in the **host** side of the port mapping only. binbash always listens on 8080 inside the container. Pass this through to the app and it starts listening somewhere else, while Docker keeps forwarding to 8080 — the site simply stops responding. |
+| `BINBASH_VERSION` | A build argument, stamped into the binary and shown on the settings page. |
+| `TZ` | The one exception — it's a real environment variable, and it *is* passed through, because the app needs it for timestamps. |
+
+#### Using binbash.toml instead
+
+If you'd rather keep one TOML file, mount it read-only and skip the environment block entirely — see [Changing other settings](#changing-other-settings) above. Precedence is the same as anywhere else: defaults < config file < environment variables. Set something in both places and the environment wins, which is a genuinely easy way to spend an afternoon wondering why an edit did nothing.
 
 ---
 
