@@ -37,6 +37,7 @@
                 <ul class="item-sublist">
                   {{range .Items}}
                     <li>
+                      {{if and $.ColorTags .Color}}<span class="dot dot-{{.Color}}" role="img" aria-label="{{$.ColorLabel}}: {{.ColorName}}"></span>{{end}}
                       <a href="/items/{{.ID}}/edit">{{.Name}}</a>
                       {{if .Description}}<span class="subtle"> — {{.Description}}</span>{{end}}
                     </li>

@@ -15,6 +15,7 @@
         {{range .Items}}
           <li class="bin-row">
             <div>
+              {{if and $.ColorTags .Color}}<span class="dot dot-{{.Color}}" role="img" aria-label="{{$.ColorLabel}}: {{.ColorName}}"></span>{{end}}
               <strong>{{.Name}}</strong>
               <a class="badge" href="/bins/{{.BinID}}/edit">{{.BinName}}</a>
               {{if .Description}}<p class="subtle">{{.Description}}</p>{{end}}

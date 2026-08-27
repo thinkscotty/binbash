@@ -28,6 +28,12 @@ type Handlers struct {
 	AI            *ai.Client // nil when AI tagging is disabled
 	AITagOptions  ai.TagOptions
 
+	// ColorTags backs the optional per-item color swatches; main assigns it
+	// after New, the way Updater below is, rather than growing New's already
+	// long positional signature. The zero value is the feature switched off,
+	// which is what every caller that doesn't care about it wants.
+	ColorTags ColorTagConfig
+
 	// Updater and RequestRestart back the settings page's self-update flow;
 	// main assigns them after New. RequestRestart asks main to gracefully
 	// shut down and re-exec once the update response has gone out.
@@ -73,6 +79,13 @@ func (h *Handlers) render(w http.ResponseWriter, page string, data any) {
 		m = map[string]any{}
 	}
 	m["CurrentPage"] = strings.TrimSuffix(page, ".html")
+	// Injected here rather than by each handler because the color dot shows up
+	// on four separate pages (items, search, bins, item_delete) and the picker
+	// on two more -- setting it centrally is one line instead of six call
+	// sites that each have to remember.
+	m["ColorTags"] = h.ColorTags.Enabled
+	m["ColorLabel"] = h.ColorTags.Label
+	m["ColorChoices"] = colorTags
 	data = m
 
 	// Render into a buffer first so a template error becomes a clean 500 rather

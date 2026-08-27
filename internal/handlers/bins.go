@@ -350,7 +350,7 @@ func (h *Handlers) loadBinsWithItems() ([]BinWithItems, error) {
 	}
 
 	rows, err := h.DB.Query(
-		`SELECT id, bin_id, name, COALESCE(description, '') FROM items ORDER BY name`,
+		`SELECT id, bin_id, name, COALESCE(description, ''), color FROM items ORDER BY name`,
 	)
 	if err != nil {
 		return nil, err
@@ -359,7 +359,7 @@ func (h *Handlers) loadBinsWithItems() ([]BinWithItems, error) {
 
 	for rows.Next() {
 		var it Item
-		if err := rows.Scan(&it.ID, &it.BinID, &it.Name, &it.Description); err != nil {
+		if err := rows.Scan(&it.ID, &it.BinID, &it.Name, &it.Description, &it.Color); err != nil {
 			return nil, err
 		}
 		if b, ok := byID[it.BinID]; ok {

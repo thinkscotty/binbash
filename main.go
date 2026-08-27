@@ -134,6 +134,7 @@ func main() {
 		Breadth:     cfg.AITagBreadth,
 		ExtraPrompt: cfg.AITagPrompt,
 	})
+	h.ColorTags = handlers.ColorTagConfig{Enabled: cfg.ColorTags, Label: cfg.ColorTagLabel}
 
 	// The executable path is resolved now, at startup, because a self-update
 	// renames the running binary's inode aside — after that, /proc/self/exe

@@ -1,7 +1,9 @@
 {{define "content"}}
 <section class="card">
   <h1>Delete item</h1>
-  <p>Are you sure you want to delete <strong>{{.Item.Name}}</strong>
+  <p>Are you sure you want to delete
+     {{if and .ColorTags .Item.Color}}<span class="dot dot-{{.Item.Color}}" role="img" aria-label="{{.ColorLabel}}: {{.Item.ColorName}}"></span>{{end}}
+     <strong>{{.Item.Name}}</strong>
      <span class="badge">{{.Item.BinName}}</span>?</p>
   {{if .Item.Description}}<p class="subtle">{{.Item.Description}}</p>{{end}}
   <p class="subtle">This can't be undone.</p>

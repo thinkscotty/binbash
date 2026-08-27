@@ -38,24 +38,48 @@ var backupFilenamePattern = regexp.MustCompile(`^binbash-\d{8}-\d{6}\.csv$`)
 // as "force this cell to plain text".
 const csvFormulaPrefixes = "=+-@"
 
+// csvNeedsEscape reports whether a field must be prefixed with a single quote
+// on export. That covers the formula characters above, and also a field that
+// already begins with a single quote -- otherwise export and import disagree
+// about whether that quote is the user's text or an escape binbash added, and
+// import strips a character the user typed.
+func csvNeedsEscape(s string) bool {
+	return s != "" && (strings.ContainsRune(csvFormulaPrefixes, rune(s[0])) || s[0] == '\'')
+}
+
 // sanitizeCSVField defuses a field for safe opening in a spreadsheet program.
 func sanitizeCSVField(s string) string {
-	if s != "" && strings.ContainsRune(csvFormulaPrefixes, rune(s[0])) {
+	if csvNeedsEscape(s) {
 		return "'" + s
 	}
 	return s
 }
 
-// desanitizeCSVField reverses sanitizeCSVField, so re-importing binbash's own
-// export round-trips exactly instead of accumulating a leading quote.
+// desanitizeCSVField is the exact inverse of sanitizeCSVField, so re-importing
+// binbash's own export round-trips a field unchanged rather than accumulating
+// or shedding a leading quote. The two must stay in step: the quote is stripped
+// on exactly the fields sanitizeCSVField would have added one to.
+//
+// Backups written before csvNeedsEscape existed left a leading quote unescaped,
+// so a field that genuinely started with one ("'-40C probe") lost it. Those
+// files can't be repaired here -- the information was gone at export time --
+// but new exports round-trip correctly.
 func desanitizeCSVField(s string) string {
-	if len(s) >= 2 && s[0] == '\'' && strings.ContainsRune(csvFormulaPrefixes, rune(s[1])) {
+	if len(s) >= 2 && s[0] == '\'' && csvNeedsEscape(s[1:]) {
 		return s[1:]
 	}
 	return s
 }
 
-var backupCSVHeader = []string{"item_name", "item_description", "keywords", "bin_name", "bin_category", "bin_description"}
+// backupCSVHeader is the current export format. legacyBackupCSVHeader is the
+// format shipped before item color tags existed; "color" was appended as the
+// last column precisely so the two are identical up to that point, and every
+// backup a user already has on disk still imports cleanly. Import accepts
+// either; export always writes the current one.
+var (
+	backupCSVHeader       = []string{"item_name", "item_description", "keywords", "bin_name", "bin_category", "bin_description", "color"}
+	legacyBackupCSVHeader = []string{"item_name", "item_description", "keywords", "bin_name", "bin_category", "bin_description"}
+)
 
 func (h *Handlers) BackupPage(w http.ResponseWriter, r *http.Request) {
 	h.renderBackup(w, nil)
@@ -82,6 +106,7 @@ func (h *Handlers) ExportBackup(w http.ResponseWriter, r *http.Request) {
 type importRow struct {
 	itemName, itemDescription, keywords  string
 	binName, binCategory, binDescription string
+	color                                string
 }
 
 func (h *Handlers) ImportBackup(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +151,9 @@ func (h *Handlers) ImportBackup(w http.ResponseWriter, r *http.Request) {
 	)
 	switch {
 	case equalHeader(records[0], backupCSVHeader):
-		rows, errMsg = parseBinbashCSV(records)
+		rows, errMsg = parseBinbashCSV(records, true)
+	case equalHeader(records[0], legacyBackupCSVHeader):
+		rows, errMsg = parseBinbashCSV(records, false)
 	case isHomeboxHeader(records[0]):
 		var noBin, archived, noName int
 		rows, noBin, archived, noName = parseHomeboxCSV(records)
@@ -168,12 +195,22 @@ func (h *Handlers) ImportBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 // parseBinbashCSV converts the rows of a binbash export (row 0 already
-// confirmed to carry backupCSVHeader) into importRows. It returns a
-// human-friendly message for the first invalid row, preserving the strict
-// all-or-nothing validation the export/import round-trip relies on: binbash's
-// own data is expected to already be within limits, so anything out of bounds
-// signals a corrupt or hand-edited file worth rejecting outright.
-func parseBinbashCSV(records [][]string) (rows []importRow, errMsg string) {
+// confirmed to carry backupCSVHeader, or legacyBackupCSVHeader when hasColor
+// is false) into importRows. It returns a human-friendly message for the first
+// invalid row, preserving the strict all-or-nothing validation the
+// export/import round-trip relies on: binbash's own data is expected to
+// already be within limits, so anything out of bounds signals a corrupt or
+// hand-edited file worth rejecting outright.
+//
+// The color column is the one exception to that strictness: an unrecognized
+// slug is normalized away to "no color" rather than failing the row. It's a
+// closed vocabulary that only a hand-edited file could violate, and aborting
+// somebody's entire restore over a cosmetic field would be a bad trade --
+// dropping it degrades to exactly the pre-feature behavior.
+//
+// Indexing is safe without a length check because encoding/csv fixes the field
+// count from the header row and rejects any record that doesn't match it.
+func parseBinbashCSV(records [][]string, hasColor bool) (rows []importRow, errMsg string) {
 	rows = make([]importRow, 0, len(records)-1)
 	for i, rec := range records[1:] {
 		row := importRow{
@@ -184,6 +221,9 @@ func parseBinbashCSV(records [][]string) (rows []importRow, errMsg string) {
 			binCategory:     desanitizeCSVField(strings.TrimSpace(rec[4])),
 			binDescription:  desanitizeCSVField(strings.TrimSpace(rec[5])),
 		}
+		if hasColor {
+			row.color = normalizeColor(rec[6])
+		}
 		if formErr := validateImportRow(row.itemName, row.itemDescription, row.keywords, row.binName, row.binCategory, row.binDescription); formErr != "" {
 			return nil, fmt.Sprintf("Row %d: %s", i+2, formErr)
 		}
@@ -193,9 +233,23 @@ func parseBinbashCSV(records [][]string) (rows []importRow, errMsg string) {
 }
 
 // commitImport loads rows into the database in a single all-or-nothing
-// transaction. Bins are matched to existing rows by exact name and created on
-// demand; an existing bin's category/description is left untouched, so
-// importing a name that already exists merges into it rather than duplicating.
+// transaction. Bins are matched to existing rows by name ignoring case and
+// created on demand; an existing bin's category/description is left untouched,
+// so importing a name that already exists merges into it rather than
+// duplicating.
+//
+// Matching ignores case because everything else about bin names does:
+// existingBinName compares COLLATE NOCASE, and the UI refuses to create or
+// rename a bin into a case-variant of another. Matching exactly here would let
+// an import walk straight past that rule -- importing "garage" alongside an
+// existing "Garage" creates a second bin, which is the ambiguity idx_bins_name
+// was added to prevent, and which the user then cannot repair by renaming
+// because the rename is itself blocked as a duplicate.
+//
+// strings.ToLower folds at least as much as SQLite's NOCASE (which only folds
+// ASCII A-Z), so two names NOCASE-equal are always ToLower-equal: no
+// case-variant duplicate can slip through. Names that differ only outside ASCII
+// can still coexist as separate bins, exactly as the UI allows.
 // When replace is true, all current bins and items are deleted first and the
 // backup watermark reset. It returns the number of items inserted and the
 // number of bins newly created.
@@ -223,6 +277,9 @@ func (h *Handlers) commitImport(rows []importRow, replace bool) (itemCount, newB
 		}
 	}
 
+	// Keyed by folded name; the original casing is preserved in the bins table
+	// itself, so a bin created by an earlier row keeps the spelling it came in
+	// with while later case-variants merge into it.
 	binIDs := map[string]int64{}
 	binRows, err := tx.Query(`SELECT id, name FROM bins`)
 	if err != nil {
@@ -235,7 +292,7 @@ func (h *Handlers) commitImport(rows []importRow, replace bool) (itemCount, newB
 			binRows.Close()
 			return 0, 0, err
 		}
-		binIDs[name] = id
+		binIDs[strings.ToLower(name)] = id
 	}
 	binRows.Close()
 	if err := binRows.Err(); err != nil {
@@ -243,7 +300,8 @@ func (h *Handlers) commitImport(rows []importRow, replace bool) (itemCount, newB
 	}
 
 	for _, row := range rows {
-		binID, ok := binIDs[row.binName]
+		binKey := strings.ToLower(row.binName)
+		binID, ok := binIDs[binKey]
 		if !ok {
 			res, err := tx.Exec(
 				`INSERT INTO bins (name, description, category) VALUES (?, ?, ?)`,
@@ -256,12 +314,12 @@ func (h *Handlers) commitImport(rows []importRow, replace bool) (itemCount, newB
 			if err != nil {
 				return 0, 0, err
 			}
-			binIDs[row.binName] = binID
+			binIDs[binKey] = binID
 			newBins++
 		}
 		if _, err := tx.Exec(
-			`INSERT INTO items (bin_id, name, description, keywords) VALUES (?, ?, ?, ?)`,
-			binID, row.itemName, row.itemDescription, row.keywords,
+			`INSERT INTO items (bin_id, name, description, keywords, color) VALUES (?, ?, ?, ?, ?)`,
+			binID, row.itemName, row.itemDescription, row.keywords, row.color,
 		); err != nil {
 			return 0, 0, err
 		}
@@ -293,10 +351,16 @@ func (h *Handlers) renderBackup(w http.ResponseWriter, data map[string]any) {
 // writeCSVTo streams the full inventory as a denormalized CSV (one row per
 // item, with its bin's fields repeated) to w. It's shared by the manual
 // export download and the automatic on-device backup writer.
+//
+// The color column is written whether or not color tags are switched on. A
+// backup is meant to be a complete copy of what's stored, and omitting a
+// column the operator happens not to be displaying today would make the export
+// lossy the moment they turned the feature off.
 func (h *Handlers) writeCSVTo(w io.Writer) (int, error) {
 	rows, err := h.DB.Query(`
 		SELECT items.name, COALESCE(items.description, ''), COALESCE(items.keywords, ''),
-		       bins.name, COALESCE(bins.category, ''), COALESCE(bins.description, '')
+		       bins.name, COALESCE(bins.category, ''), COALESCE(bins.description, ''),
+		       items.color
 		FROM items JOIN bins ON bins.id = items.bin_id
 		ORDER BY bins.name, items.name`)
 	if err != nil {
@@ -309,15 +373,20 @@ func (h *Handlers) writeCSVTo(w io.Writer) (int, error) {
 		return 0, err
 	}
 
-	var itemName, itemDescription, keywords, binName, binCategory, binDescription string
+	var itemName, itemDescription, keywords, binName, binCategory, binDescription, color string
 	count := 0
 	for rows.Next() {
-		if err := rows.Scan(&itemName, &itemDescription, &keywords, &binName, &binCategory, &binDescription); err != nil {
+		if err := rows.Scan(&itemName, &itemDescription, &keywords, &binName, &binCategory, &binDescription, &color); err != nil {
 			return count, err
 		}
+		// color comes from a closed vocabulary that can't begin with a formula
+		// character, so sanitizing it is a no-op -- applied anyway so every
+		// field in this record is handled identically and nobody has to work
+		// out which one is the exception.
 		if err := cw.Write([]string{
 			sanitizeCSVField(itemName), sanitizeCSVField(itemDescription), sanitizeCSVField(keywords),
 			sanitizeCSVField(binName), sanitizeCSVField(binCategory), sanitizeCSVField(binDescription),
+			sanitizeCSVField(color),
 		}); err != nil {
 			return count, err
 		}

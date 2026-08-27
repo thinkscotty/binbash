@@ -1,0 +1,15 @@
+-- Optional per-item colour tag: a marker for "which coloured bag inside the
+-- bin is this in", though the config lets it be relabelled for any other
+-- purpose. Off unless color_tags.enabled is set.
+--
+-- The value is a slug from a closed vocabulary ('red', 'lightblue', ...)
+-- rather than a hex code, so backups stay readable and the actual colour
+-- remains a presentation concern living in CSS. Empty string means no colour,
+-- which is meaningful in its own right: no dot shown means the item is loose
+-- in the bin rather than bagged.
+--
+-- NOT NULL DEFAULT '' gives every existing row a valid value immediately and
+-- saves the read paths a COALESCE. items_fts names its columns explicitly in
+-- all three sync triggers, so a new column on items leaves the search index
+-- and its triggers entirely untouched.
+ALTER TABLE items ADD COLUMN color TEXT NOT NULL DEFAULT '';

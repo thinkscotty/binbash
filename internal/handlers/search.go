@@ -24,7 +24,7 @@ func (h *Handlers) Search(w http.ResponseWriter, r *http.Request) {
 	var items []Item
 	if ftsQuery := buildFTSQuery(query); ftsQuery != "" {
 		rows, err := h.DB.Query(
-			`SELECT items.id, items.bin_id, bins.name, items.name, COALESCE(items.description, ''), COALESCE(items.keywords, '')
+			`SELECT items.id, items.bin_id, bins.name, items.name, COALESCE(items.description, ''), COALESCE(items.keywords, ''), items.color
 			 FROM items_fts
 			 JOIN items ON items.id = items_fts.rowid
 			 JOIN bins ON bins.id = items.bin_id
@@ -40,7 +40,7 @@ func (h *Handlers) Search(w http.ResponseWriter, r *http.Request) {
 
 		for rows.Next() {
 			var it Item
-			if err := rows.Scan(&it.ID, &it.BinID, &it.BinName, &it.Name, &it.Description, &it.Keywords); err != nil {
+			if err := rows.Scan(&it.ID, &it.BinID, &it.BinName, &it.Name, &it.Description, &it.Keywords, &it.Color); err != nil {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
 			}

@@ -14,6 +14,20 @@
         <option value="{{.ID}}" {{if eq .ID $selected}}selected{{end}}>{{.Name}}</option>
       {{end}}
     </select>
+    {{if .ColorTags}}
+    <fieldset class="swatches">
+      <legend>{{.ColorLabel}} <span class="subtle">(optional)</span></legend>
+      <div class="swatch-row">
+        <input type="radio" id="color-none" name="color" value="" {{if not .Item.Color}}checked{{end}}>
+        <label for="color-none" class="swatch swatch-none"><span class="visually-hidden">None</span></label>
+        {{$c := .Item.Color}}
+        {{range .ColorChoices}}
+          <input type="radio" id="color-{{.Slug}}" name="color" value="{{.Slug}}" {{if eq .Slug $c}}checked{{end}}>
+          <label for="color-{{.Slug}}" class="swatch swatch-{{.Slug}}"><span class="visually-hidden">{{.Label}}</span></label>
+        {{end}}
+      </div>
+    </fieldset>
+    {{end}}
     <label for="description">Description <span class="subtle">(optional)</span></label>
     <textarea id="description" name="description" rows="2" maxlength="2000">{{.Item.Description}}</textarea>
     <label for="keywords">Keywords <span class="subtle">(optional)</span></label>

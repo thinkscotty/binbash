@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 	"github.com/thinkscotty/binbash/internal/auth"
@@ -22,6 +23,15 @@ import (
 const (
 	defaultAITagCount = 3
 	maxAITagCount     = 8
+
+	// defaultColorTagLabel names the color-tag field when the operator hasn't
+	// picked their own. The feature exists for marking which colored bag an
+	// item is in, but nothing about it is bag-specific, so the label is
+	// configurable and the neutral default doesn't presume a use.
+	defaultColorTagLabel = "Color"
+
+	// maxColorTagLabelLen keeps a stray novel out of the form's legend.
+	maxColorTagLabelLen = 30
 
 	// defaultConfigPath is checked when BINBASH_CONFIG isn't set. Its
 	// absence isn't an error -- pure env-var configuration, with no file at
@@ -50,6 +60,8 @@ type Config struct {
 	AITagBreadth   string
 	AITagPrompt    string
 	AutoBackupDir  string
+	ColorTags      bool
+	ColorTagLabel  string
 }
 
 // fileConfig is the TOML file's shape. Every field is optional -- decoding
@@ -77,6 +89,13 @@ type fileConfig struct {
 		TagBreadth string `toml:"tag_breadth"`
 		TagPrompt  string `toml:"tag_prompt"`
 	} `toml:"ai"`
+	// A plain bool, unlike TagCount's *int: the default is false, so "absent
+	// from the file" and "explicitly false" want the same outcome and there's
+	// nothing to tell apart.
+	ColorTags struct {
+		Enabled bool   `toml:"enabled"`
+		Label   string `toml:"label"`
+	} `toml:"color_tags"`
 }
 
 func Load() (*Config, error) {
@@ -92,6 +111,7 @@ func Load() (*Config, error) {
 		DBPath:         "./data/binbash.db",
 		AITagCount:     defaultAITagCount,
 		AITagBreadth:   "moderate",
+		ColorTagLabel:  defaultColorTagLabel,
 	}
 
 	path, explicit := os.LookupEnv("BINBASH_CONFIG")
@@ -120,8 +140,27 @@ func Load() (*Config, error) {
 	cfg.AIAPIKey = getEnv("BINBASH_AI_API_KEY", cfg.AIAPIKey)
 	cfg.AIModel = getEnv("BINBASH_AI_MODEL", cfg.AIModel)
 	cfg.AITagPrompt = getEnv("BINBASH_AI_TAG_PROMPT", cfg.AITagPrompt)
+	cfg.ColorTagLabel = getEnv("BINBASH_COLOR_TAGS_LABEL", cfg.ColorTagLabel)
 	if v := os.Getenv("BINBASH_TRUSTED_PROXIES"); v != "" {
 		cfg.TrustedProxies = splitList(v)
+	}
+	if v := os.Getenv("BINBASH_COLOR_TAGS"); v != "" {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("BINBASH_COLOR_TAGS must be true or false, not %q", v)
+		}
+		cfg.ColorTags = enabled
+	}
+
+	// A label made entirely of spaces would render an empty legend above the
+	// swatches, leaving them unexplained; fall back rather than fail, since
+	// this is cosmetic and nothing about it is worth refusing to start over.
+	cfg.ColorTagLabel = strings.TrimSpace(cfg.ColorTagLabel)
+	if cfg.ColorTagLabel == "" {
+		cfg.ColorTagLabel = defaultColorTagLabel
+	}
+	if utf8.RuneCountInString(cfg.ColorTagLabel) > maxColorTagLabelLen {
+		return nil, fmt.Errorf("color tag label is too long (max %d characters)", maxColorTagLabelLen)
 	}
 
 	// A hostname here would be a quiet footgun: it binds to whatever the name
@@ -231,6 +270,12 @@ func applyFileConfig(cfg *Config, fc fileConfig) {
 	}
 	if fc.AI.TagPrompt != "" {
 		cfg.AITagPrompt = fc.AI.TagPrompt
+	}
+	if fc.ColorTags.Enabled {
+		cfg.ColorTags = true
+	}
+	if fc.ColorTags.Label != "" {
+		cfg.ColorTagLabel = fc.ColorTags.Label
 	}
 }
 

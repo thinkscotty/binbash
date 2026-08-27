@@ -61,3 +61,18 @@ tag_breadth = "moderate"
 # Do not suggest broad categories -- only specific names for the thing itself.
 # Every tag must be a single word.
 # """
+
+# ---- Color tags (optional) ----
+# Adds a row of color swatches to the item form. Pick one and a matching dot
+# appears next to that item everywhere it's listed; pick none and no dot shows,
+# which is useful information in itself. Built for marking which colored
+# storage bag inside a bin an item lives in, but the label is yours to set, so
+# it works just as well for who owns something, which room it belongs to, or
+# anything else you can code by color.
+#
+# Off unless enabled is true. Turning it back off hides the swatches and dots
+# but never deletes what you've already tagged -- the colors stay in the
+# database and in your CSV backups, and reappear if you switch it on again.
+[color_tags]
+enabled = false
+label = "Color"   # what the field is called on the item form, e.g. "Bag"

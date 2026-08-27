@@ -444,6 +444,171 @@ button.danger:hover {
   font-weight: 400;
 }
 
+/* ---- Optional item colour tags ----
+   Enabled by [color_tags] in the config; absent from the markup entirely when
+   it's off. The picker is a radio group whose inputs are hidden and whose
+   labels are drawn as circles, which gives selection, keyboard navigation
+   (arrow keys, natively) and form submission with no JavaScript at all.
+
+   Each colour is defined once, in a rule shared by the picker swatch and the
+   list dot, so the palette has a single home. The colours must be classes
+   rather than inline styles: binbash's CSP has no 'unsafe-inline', so a
+   style="" attribute would simply be dropped by the browser. */
+.swatches {
+  border: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+
+/* Match the weight of the ordinary field labels this sits among. */
+.swatches legend {
+  padding: 0;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+/* The circles live in their own flex row rather than the fieldset itself
+   being the flex container: browsers render <legend> as a special child of
+   <fieldset>, and how it behaves under display:flex there is inconsistent
+   between engines. One wrapper div sidesteps that entirely. */
+.swatch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Hidden, but deliberately NOT display:none or visibility:hidden — either
+   would drop the radios out of the tab order and the accessibility tree,
+   taking keyboard selection and screen-reader support with them. */
+.swatch-row input[type="radio"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.swatch {
+  display: block;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  margin-bottom: 0;
+  cursor: pointer;
+  /* Combined with the 0.5rem gap, this brings each tap target up to roughly
+     the 44px a thumb needs without making the circles themselves oversized. */
+  outline-offset: 3px;
+}
+
+.swatch:hover {
+  outline: 2px solid var(--color-border);
+}
+
+input[type="radio"]:checked + .swatch {
+  outline: 2px solid var(--color-accent);
+}
+
+input[type="radio"]:focus-visible + .swatch {
+  outline: 2px solid var(--color-accent);
+  box-shadow: 0 0 0 4px var(--color-bg);
+}
+
+/* "No colour": a dashed ring with a diagonal bar, so it reads as an absence
+   rather than as one more colour in the row. */
+.swatch-none {
+  background: var(--color-bg);
+  border-style: dashed;
+  background-image: linear-gradient(
+    to bottom right,
+    transparent calc(50% - 1px),
+    var(--color-subtle) calc(50% - 1px),
+    var(--color-subtle) calc(50% + 1px),
+    transparent calc(50% + 1px)
+  );
+}
+
+/* The dot shown beside an item's name in lists. Small, but bordered for the
+   same reason the swatches are: white and black need an edge to read against
+   the card. */
+.dot {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  vertical-align: baseline;
+  margin-right: 0.15rem;
+}
+
+/* Palette. Tuned for the Nord surface these sit on (--color-surface): more
+   saturated than Nord's own aurora colours, because at dot size the job is
+   telling ten colours apart at a glance rather than blending in. */
+.swatch-white,
+.dot-white {
+  background-color: #ffffff;
+}
+
+.swatch-black,
+.dot-black {
+  background-color: #15171d;
+}
+
+.swatch-red,
+.dot-red {
+  background-color: #e0434c;
+}
+
+.swatch-orange,
+.dot-orange {
+  background-color: #e0873a;
+}
+
+.swatch-yellow,
+.dot-yellow {
+  background-color: #ebcb52;
+}
+
+.swatch-green,
+.dot-green {
+  background-color: #4cae4f;
+}
+
+.swatch-lightblue,
+.dot-lightblue {
+  background-color: #8fd3ef;
+}
+
+.swatch-darkblue,
+.dot-darkblue {
+  background-color: #3457c4;
+}
+
+.swatch-purple,
+.dot-purple {
+  background-color: #9b5fd0;
+}
+
+.swatch-pink,
+.dot-pink {
+  background-color: #ec7fb6;
+}
+
+/* Text that exists only for screen readers: the colour name behind each
+   swatch and each dot, which sighted users get from the colour itself. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .stats {
   display: flex;
   gap: 2rem;
