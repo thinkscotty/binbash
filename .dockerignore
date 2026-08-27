@@ -1,6 +1,34 @@
-.git
-.github
+# Build context hygiene. Two jobs here: keeping the context small, and keeping
+# secrets out of the build stage. binbash.toml holds the bootstrap password and
+# the AI API key in plaintext -- it never reaches the final image, but without
+# this line it does land in the intermediate build layer, where the build cache
+# and anything built with --target build can read it.
+binbash.toml
+.env
+*.env
+
+# Databases, backups and their WAL sidecars: large, private, and meaningless
+# inside an image.
 data
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.csv
+
+# Not needed to compile, and changing any of them would otherwise bust the
+# build cache for no reason.
+.git
+.gitignore
+.github
+internal_docs
 dist
 *.md
+CLAUDE.md
+Dockerfile
+.dockerignore
+compose.yaml
+compose.override.yaml
+
+# A host build of the binary; the image builds its own.
 binbash

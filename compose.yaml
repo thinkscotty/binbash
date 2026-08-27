@@ -1,0 +1,84 @@
+# binbash under Docker Compose. Copy .env.example to .env, edit it, then:
+#
+#     docker compose up -d --build
+#
+# Settings live in this file as BINBASH_* environment variables rather than in
+# binbash.toml. Both work -- and environment always wins over the file -- but
+# keeping them here means one file to read when something looks wrong. If you
+# prefer the TOML file, mount it read-only at /app/binbash.toml (see below).
+
+services:
+  binbash:
+    build:
+      context: .
+      args:
+        # Stamped into the binary, shown on the settings page. Set it in .env
+        # to the release tag you built from, so the running container can say
+        # what it is.
+        VERSION: ${BINBASH_VERSION:-dev}
+    image: binbash:${BINBASH_VERSION:-dev}
+    container_name: binbash
+    restart: unless-stopped
+
+    # The uid:gid that owns ./data on this host -- `id -u`:`id -g`. binbash
+    # checks this at startup and refuses to run rather than create files it
+    # can't read back later, so a mismatch here is a clean error at boot
+    # instead of a broken database later.
+    user: "${PUID:-1000}:${PGID:-1000}"
+
+    ports:
+      # Loopback only: your reverse proxy can reach binbash, the rest of the
+      # LAN cannot. To serve the LAN directly instead, drop the 127.0.0.1
+      # prefix -- but then it is plain HTTP, so put a proxy in front first.
+      - "127.0.0.1:${BINBASH_PORT:-8080}:8080"
+
+    volumes:
+      # The whole inventory. Back this directory up.
+      - ./data:/data
+      # Optional: use binbash.toml instead of the environment block below.
+      # - ./binbash.toml:/app/binbash.toml:ro
+
+    environment:
+      # Without this, every timestamp binbash shows you -- and every log line
+      # -- is UTC, because a container has no idea where it is.
+      TZ: ${TZ:-Etc/UTC}
+
+      # Read only on the very first start, to create your account. From then on
+      # the password lives hashed in the database and this is ignored, so once
+      # you have logged in successfully you can delete it from .env.
+      BINBASH_PASSWORD: ${BINBASH_PASSWORD:-}
+
+      # Automatic CSV backups, kept inside the mounted volume so they land on
+      # the host alongside the database.
+      BINBASH_AUTO_BACKUP_DIR: /data/backups
+
+      # A reverse proxy in another container is not on loopback as far as
+      # binbash is concerned. Left unset, binbash sees the proxy's address as
+      # every visitor's address -- so one person's failed logins throttle the
+      # whole household. Set this to the proxy's Docker network.
+      # BINBASH_TRUSTED_PROXIES: 172.18.0.0/16
+
+      # BINBASH_AI_BASE_URL: https://api.openai.com/v1
+      # BINBASH_AI_API_KEY: ${BINBASH_AI_API_KEY:-}
+      # BINBASH_AI_MODEL: gpt-4o-mini
+
+    # binbash writes to /data and nowhere else, so the rest of the filesystem
+    # can be sealed. Verified: it starts, migrates and serves under all three.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+    # binbash drains in-flight requests for up to 10s on SIGTERM and only then
+    # closes SQLite, which is what checkpoints the WAL. Docker's default grace
+    # period is also 10s, so the SIGKILL can land exactly on the close. This
+    # gives the shutdown room to finish.
+    stop_grace_period: 30s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
