@@ -141,7 +141,11 @@ func (h *Handlers) TagItems(w http.ResponseWriter, r *http.Request) {
 			failed++
 			continue
 		}
-		if len(filtered) > 0 {
+		// Compared against what was stored rather than what the model
+		// returned: a tag list can be non-empty and still add nothing, either
+		// because every tag was a duplicate or because the length cap in
+		// mergeKeywords stopped it.
+		if merged != it.keywords {
 			tagged++
 		} else {
 			skipped++
@@ -167,6 +171,14 @@ func (h *Handlers) TagItems(w http.ResponseWriter, r *http.Request) {
 // mergeKeywords appends newTags onto existing (a comma-separated keyword
 // string), skipping any tag already present in existing, case-insensitively.
 // existing is never altered or reordered, only extended.
+//
+// The result never exceeds maxKeywordsLen: tagging stops once the next tag
+// would cross it. That bound is load-bearing rather than cosmetic. This is the
+// only path that writes keywords without going through validateItem, and an
+// over-long value is rejected everywhere it is later read back -- by the item's
+// own edit form, and by CSV import, whose strict all-or-nothing parsing refuses
+// an entire restore over one over-long row. A few extra AI tags are not worth a
+// backup that won't load.
 func mergeKeywords(existing string, newTags []string) string {
 	if len(newTags) == 0 {
 		return existing
@@ -185,12 +197,15 @@ func mergeKeywords(existing string, newTags []string) string {
 		if tag == "" || seen[strings.ToLower(tag)] {
 			continue
 		}
-		seen[strings.ToLower(tag)] = true
-		if merged == "" {
-			merged = tag
-		} else {
-			merged += ", " + tag
+		candidate := tag
+		if merged != "" {
+			candidate = merged + ", " + tag
 		}
+		if tooLong(candidate, maxKeywordsLen) {
+			break
+		}
+		seen[strings.ToLower(tag)] = true
+		merged = candidate
 	}
 	return merged
 }

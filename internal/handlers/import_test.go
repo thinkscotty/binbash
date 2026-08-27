@@ -269,6 +269,10 @@ func TestImportBackupReplaceWithNoImportableRows(t *testing.T) {
 // TestImportBackupBinbashEndToEnd guards against regressions in binbash's own
 // import format after the parser split: a native export must still be detected
 // and loaded through the same refactored handler.
+//
+// Its fixture is deliberately left on the pre-color-tag six-column header, so
+// it doubles as the compatibility test for every backup a user already has
+// sitting on disk from before that column existed.
 func TestImportBackupBinbashEndToEnd(t *testing.T) {
 	database := newTestDB(t)
 	tmpl := template.Must(template.New("backup.html").Parse(
@@ -305,5 +309,90 @@ func TestImportBackupBinbashEndToEnd(t *testing.T) {
 	database.QueryRow(`SELECT COUNT(*) FROM bins`).Scan(&bins)
 	if items != 2 || bins != 1 {
 		t.Errorf("DB after import: items=%d bins=%d, want 2/1", items, bins)
+	}
+}
+
+// TestCommitImportMatchesBinNamesIgnoringCase pins that import agrees with the
+// rest of the app about when two bin names are the same bin.
+//
+// existingBinName compares COLLATE NOCASE and the UI refuses to create or
+// rename a bin into a case-variant of another, but idx_bins_name is
+// case-sensitive, so nothing at the database layer stops an import from
+// creating one. When it did, the result was a state the user could not repair:
+// the obvious fix — renaming the duplicate so the two merge — is itself
+// rejected as a duplicate name.
+func TestCommitImportMatchesBinNamesIgnoringCase(t *testing.T) {
+	database := newTestDB(t)
+	h := &Handlers{DB: database}
+
+	if _, err := database.Exec(`INSERT INTO bins (name) VALUES ('Garage')`); err != nil {
+		t.Fatalf("seed bin: %v", err)
+	}
+
+	items, newBins, err := h.commitImport([]importRow{
+		{itemName: "Hammer", binName: "garage"},
+		{itemName: "Screwdriver", binName: "GARAGE"},
+		{itemName: "Sledgehammer", binName: "Garage"},
+	}, false)
+	if err != nil {
+		t.Fatalf("commitImport: %v", err)
+	}
+	if items != 3 || newBins != 0 {
+		t.Errorf("commitImport = %d items / %d new bins, want 3/0", items, newBins)
+	}
+
+	var bins int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM bins`).Scan(&bins); err != nil {
+		t.Fatal(err)
+	}
+	if bins != 1 {
+		var names []string
+		rows, _ := database.Query(`SELECT name FROM bins ORDER BY id`)
+		defer rows.Close()
+		for rows.Next() {
+			var n string
+			rows.Scan(&n)
+			names = append(names, n)
+		}
+		t.Fatalf("import created case-variant bins %q; want them all merged into 'Garage'", names)
+	}
+
+	// Everything landed in the original bin, spelled the way it already was.
+	var name string
+	var inBin int
+	database.QueryRow(`SELECT name FROM bins`).Scan(&name)
+	database.QueryRow(`SELECT COUNT(*) FROM items`).Scan(&inBin)
+	if name != "Garage" {
+		t.Errorf("existing bin was renamed to %q; import must not recase an existing bin", name)
+	}
+	if inBin != 3 {
+		t.Errorf("%d items landed in the bin, want 3", inBin)
+	}
+}
+
+// TestCommitImportCreatesOneBinForCaseVariantRows covers the same rule when
+// the bin doesn't exist yet: a file naming it inconsistently must still
+// produce exactly one bin, keeping the spelling of its first appearance.
+func TestCommitImportCreatesOneBinForCaseVariantRows(t *testing.T) {
+	database := newTestDB(t)
+	h := &Handlers{DB: database}
+
+	_, newBins, err := h.commitImport([]importRow{
+		{itemName: "Hammer", binName: "Garage Shelf"},
+		{itemName: "Screwdriver", binName: "garage shelf"},
+	}, false)
+	if err != nil {
+		t.Fatalf("commitImport: %v", err)
+	}
+	if newBins != 1 {
+		t.Errorf("newBins = %d, want 1", newBins)
+	}
+
+	var name string
+	if err := database.QueryRow(`SELECT name FROM bins`).Scan(&name); err != nil {
+		t.Fatalf("expected exactly one bin: %v", err)
+	}
+	if name != "Garage Shelf" {
+		t.Errorf("bin name = %q, want the first spelling %q", name, "Garage Shelf")
 	}
 }
