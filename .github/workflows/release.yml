@@ -8,6 +8,9 @@ on:
 
 permissions:
   contents: write
+  # For pushing the container image to GHCR. Scoped here rather than per-job so
+  # the two publishing jobs read alike; neither can use the other's grant.
+  packages: write
 
 jobs:
   build:
@@ -79,3 +82,62 @@ jobs:
           files: dist/*
           fail_on_unmatched_files: true
           generate_release_notes: true
+
+  docker:
+    name: Publish container image
+    # Not for the artifacts -- this job builds from source itself. It's a gate:
+    # if the Go build is broken on any platform, don't publish an image for that
+    # tag. A bad :latest is worse than a bad commit, because it's what every
+    # `docker compose pull` reaches for.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          # Automatic, scoped to this repository, and expires with the run. No
+          # secret to create or rotate, which is the reason to prefer GHCR over
+          # Docker Hub here -- along with no pull rate limits and no account
+          # needed to pull a public image.
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # Tag v1.2.3 publishes 1.2.3, 1.2 and 1 -- so a compose file can pin
+          # as tightly or as loosely as its owner wants -- plus the literal
+          # v1.2.3, because that's what the release archives are called and
+          # someone copying a version out of the settings page will type the v.
+          #
+          # latest=auto adds :latest on a semver tag that isn't a pre-release,
+          # so pushing v1.3.0-rc1 leaves :latest pointing at the last real one.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=${{ github.ref_name }}
+          flavor: latest=auto
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ github.ref_name }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Records how the image was built and from which commit, so the
+          # published artifact can be traced back to this workflow. It also adds
+          # the `unknown/unknown` rows that show up in GHCR's platform list --
+          # those are the attestation manifests, not broken images.
+          provenance: mode=max
+          # No registry or GHA build cache on purpose. Releases are infrequent
+          # and this build is a couple of minutes cold, so a cache layer would
+          # buy little while adding a way for the release to fail that has
+          # nothing to do with binbash.

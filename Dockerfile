@@ -3,7 +3,16 @@
 # ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
-FROM golang:1.25-alpine AS build
+# --platform=$BUILDPLATFORM pins this stage to the machine doing the building,
+# not the machine the image is for. Without it, `buildx --platform
+# linux/amd64,linux/arm64` would run the arm64 half of the build inside QEMU on
+# an amd64 runner: minutes instead of seconds, and emulated toolchains are a
+# well-known source of flaky, hard-to-reproduce build failures.
+#
+# Go doesn't need emulation. CGO is already off (see the build command below),
+# so setting GOARCH is the entire cross-compilation story -- both architectures
+# are built natively, side by side, at full speed.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
 WORKDIR /src
 
 # Dependencies resolve in their own layer, so editing Go source doesn't
@@ -18,15 +27,26 @@ COPY . .
 # on the server?" unanswerable -- so the compose file passes the real tag.
 ARG VERSION=dev
 
+# Filled in by BuildKit, once per entry in --platform: linux/amd64 gives amd64,
+# linux/arm64 gives arm64. There is no TARGETOS here because there is nowhere
+# for it to go -- the runtime stage is a Linux base image, so Linux is the only
+# thing this Dockerfile can produce.
+#
+# It is empty under the legacy (non-BuildKit) builder, which is harmless: Go
+# treats an empty GOARCH as unset and builds for the host, which is exactly what
+# a plain local `docker build` wants anyway.
+ARG TARGETARCH
+
 # CGO_ENABLED=0 because modernc.org/sqlite is pure Go: no libsqlite3, no libc,
 # nothing to link against. That is what lets the runtime stage below be a base
-# image with no operating system in it at all.
+# image with no operating system in it at all -- and, since there is no C
+# toolchain in the picture, what makes GOARCH alone enough to cross-compile.
 #
 # -trimpath matches .github/workflows/release.yml, so a container built here is
 # reproducible against the published release binary rather than merely similar.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /binbash .
+    CGO_ENABLED=0 GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /binbash .
 
 # The runtime image has no shell, so /data has to be built here and copied in.
 # It has to exist in the image at all because Docker creates a missing volume
