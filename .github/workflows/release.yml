@@ -6,11 +6,11 @@ on:
   push:
     tags: ["v*"]
 
+# Read-only by default. Permissions set here apply to every job, so a write
+# grant at this level would reach the build matrix too; each publishing job
+# instead asks for exactly the one write it needs.
 permissions:
-  contents: write
-  # For pushing the container image to GHCR. Scoped here rather than per-job so
-  # the two publishing jobs read alike; neither can use the other's grant.
-  packages: write
+  contents: read
 
 jobs:
   build:
@@ -25,11 +25,18 @@ jobs:
           - { goos: darwin, goarch: arm64 }
           - { goos: windows, goarch: amd64 }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      # Not go-version-file: the go line in go.mod is the oldest Go the code
+      # accepts, not the toolchain a release should ship with. Reading it here
+      # built every release with that exact patch, long after its security
+      # fixes had shipped. "stable" is looked up afresh on every run, so it is
+      # always the newest Go release, new minor versions included -- the same
+      # Go as golang:1-alpine in the Dockerfile, so release binaries and the
+      # image are built alike.
+      - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: stable
 
       - name: Build and package
         env:
@@ -54,7 +61,7 @@ jobs:
             tar -C stage -czf "dist/${name}.tar.gz" "${name}"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/*
@@ -63,8 +70,10 @@ jobs:
     name: Publish release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -77,11 +86,15 @@ jobs:
           sha256sum $(find . -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -printf '%P\n' | sort) > SHA256SUMS.txt
           echo "Checksums:"; cat SHA256SUMS.txt
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           fail_on_unmatched_files: true
           generate_release_notes: true
+          # A tag like v1.3.0-rc1 must not become GitHub's "latest" release:
+          # the in-app updater asks the API for releases/latest, so without
+          # this every stable install would be offered the release candidate.
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
   docker:
     name: Publish container image
@@ -91,12 +104,17 @@ jobs:
     # `docker compose pull` reaches for.
     needs: build
     runs-on: ubuntu-latest
+    # A job-level block replaces the workflow-level one rather than adding to
+    # it, so contents: read has to be restated for the checkout.
+    permissions:
+      contents: read
+      packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -107,7 +125,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
           # Tag v1.2.3 publishes 1.2.3, 1.2 and 1 -- so a compose file can pin
@@ -124,7 +142,7 @@ jobs:
             type=raw,value=${{ github.ref_name }}
           flavor: latest=auto
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64

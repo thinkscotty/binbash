@@ -111,6 +111,14 @@ if have go; then
   got_go=$(go version | awk '{print $3}' | sed 's/^go//; s/-.*//')
   if version_ge "$got_go" "$want_go"; then
     ok "Go $got_go (go.mod asks for $want_go or newer)"
+  elif [ "$(go env GOTOOLCHAIN)" = "local" ]; then
+    # Distro Go packages (Fedora's, for one) set GOTOOLCHAIN=local, so go
+    # refuses to fetch the newer toolchain go.mod asks for -- and a distro
+    # release often never ships that Go at all. Fedora also turns off the
+    # checksum database, which is what verifies a downloaded toolchain, so
+    # the fix puts all three settings back to Go's own defaults.
+    fail "Go $got_go is older than the $want_go that go.mod requires, and GOTOOLCHAIN=local stops it fetching $want_go"
+    fix "go env -w GOTOOLCHAIN=auto GOPROXY=https://proxy.golang.org,direct GOSUMDB=sum.golang.org"
   else
     fail "Go $got_go is older than the $want_go that go.mod requires"
     fix "$(install_hint golang)   # or install from https://go.dev/dl/"

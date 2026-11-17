@@ -12,7 +12,14 @@
 # Go doesn't need emulation. CGO is already off (see the build command below),
 # so setting GOARCH is the entire cross-compilation story -- both architectures
 # are built natively, side by side, at full speed.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+#
+# golang:1-alpine is the newest Go release, so a rebuild picks up new Go
+# versions and their security fixes without anyone editing this file -- the
+# same Go that `go-version: stable` gives .github/workflows/release.yml. The go
+# line in go.mod is the floor: the image sets GOTOOLCHAIN=local, so a stale
+# cached image older than that fails the build rather than quietly shipping an
+# unpatched Go.
+FROM --platform=$BUILDPLATFORM golang:1-alpine AS build
 WORKDIR /src
 
 # Dependencies resolve in their own layer, so editing Go source doesn't
@@ -65,7 +72,11 @@ RUN mkdir -p /newdata
 #
 # :nonroot pins uid 65532. See `user:` in compose.yaml -- with a bind mount you
 # want this overridden to whoever owns the directory on the host.
-FROM gcr.io/distroless/static-debian12:nonroot
+#
+# debian13, not debian12: distroless only rebuilds images for the Debian
+# releases it lists as current, and a stale image means a stale CA bundle --
+# which is what decides whose certificates binbash trusts.
+FROM gcr.io/distroless/static-debian13:nonroot
 
 WORKDIR /app
 COPY --from=build /binbash /app/binbash

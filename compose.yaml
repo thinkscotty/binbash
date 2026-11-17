@@ -11,6 +11,10 @@ services:
   binbash:
     build:
       context: .
+      # Check for newer base images on every build. Without it Docker reuses the
+      # golang and distroless images it downloaded the first time, and binbash
+      # goes on being built with that Go however old it gets.
+      pull: true
       args:
         # Stamped into the binary, shown on the settings page. Set it in .env
         # to the release tag you built from, so the running container can say

@@ -825,7 +825,7 @@ If you want a stronger front door without changing binbash, put an authenticatin
 
 ## Building from source
 
-You only need this if you want to modify binbash or build for a platform without a prebuilt release. Requires Go 1.25+.
+You only need this if you want to modify binbash or build for a platform without a prebuilt release. Requires Go 1.27.4 or newer; an older Go (1.21 onward) downloads 1.27.4 by itself on the first build.
 
 ```sh
 git clone https://github.com/thinkscotty/binbash.git
