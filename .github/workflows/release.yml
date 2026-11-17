@@ -13,8 +13,36 @@ permissions:
   contents: read
 
 jobs:
+  # Gates everything below: nothing is built, let alone published, from a tag
+  # whose checks fail. go-version: stable makes this matter -- a release can be
+  # the first thing ever built with a brand-new Go, and this is where a
+  # problem with that Go shows up instead of on someone's server.
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+
+      - run: go vet ./...
+
+      # -race adds about a minute, nearly all of it bcrypt in the auth tests,
+      # and catches the data races a concurrent HTTP server is prone to.
+      - run: go test -race ./...
+
+      # Fails only on vulnerabilities in code binbash actually calls, so an
+      # advisory in an unused corner of a dependency doesn't block a release.
+      # @latest rather than a pinned version because an older govulncheck
+      # can't load the source of a newer Go, and this job always has the
+      # newest Go.
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       matrix:
