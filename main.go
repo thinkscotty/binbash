@@ -51,10 +51,10 @@ func noDirListing(h http.Handler) http.Handler {
 	})
 }
 
-func loadTemplates() (handlers.Templates, error) {
+func loadTemplates(funcs template.FuncMap) (handlers.Templates, error) {
 	templates := make(handlers.Templates, len(pages))
 	for _, page := range pages {
-		tmpl, err := template.ParseFS(templatesFS, "web/templates/layout.html", "web/templates/"+page)
+		tmpl, err := template.New("layout.html").Funcs(funcs).ParseFS(templatesFS, "web/templates/layout.html", "web/templates/"+page)
 		if err != nil {
 			return nil, err
 		}
@@ -110,7 +110,16 @@ func main() {
 		}
 	}
 
-	templates, err := loadTemplates()
+	static, err := fs.Sub(staticFS, "web/static")
+	if err != nil {
+		log.Fatalf("static assets: %v", err)
+	}
+	assetHashes, err := hashAssets(static)
+	if err != nil {
+		log.Fatalf("static assets: %v", err)
+	}
+
+	templates, err := loadTemplates(template.FuncMap{"asset": assetURL(assetHashes)})
 	if err != nil {
 		log.Fatalf("templates: %v", err)
 	}
@@ -160,11 +169,6 @@ func main() {
 		}
 	}
 
-	static, err := fs.Sub(staticFS, "web/static")
-	if err != nil {
-		log.Fatalf("static assets: %v", err)
-	}
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /login", h.LoginPage)
 	mux.HandleFunc("POST /login", h.LoginSubmit)
@@ -196,7 +200,7 @@ func main() {
 	mux.HandleFunc("POST /items/{id}/delete", h.DeleteItem)
 	mux.HandleFunc("POST /items/{id}", h.UpdateItem)
 	mux.HandleFunc("POST /items/tag", h.TagItems)
-	mux.Handle("GET /static/", noDirListing(http.StripPrefix("/static/", http.FileServer(http.FS(static)))))
+	mux.Handle("GET /static/", staticHandler(static, assetHashes))
 
 	addr := net.JoinHostPort(cfg.BindAddress, cfg.Port)
 	srv := &http.Server{

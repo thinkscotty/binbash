@@ -250,15 +250,18 @@ The same **Import** button also accepts a [Homebox](https://homebox.software) CS
 
 ## Running as a service (systemd)
 
-On a Linux server you'll usually want binbash to start on boot and restart if it crashes. A sample unit is in the repo at [`deploy/binbash.service`](deploy/binbash.service).
+On a Linux server you'll usually want binbash to start on boot and restart if it crashes. Release downloads include a ready-made unit at `deploy/binbash.service` (it's also in the repo at [`deploy/binbash.service`](deploy/binbash.service)).
+
+Run these from inside the folder you extracted in [step 2](#2-extract). It holds both the `binbash` binary and the `deploy/` folder, so there's no need to clone the repo:
 
 ```sh
 # Create a dedicated, unprivileged user and an install directory
 sudo useradd -r -s /usr/sbin/nologin binbash
 sudo mkdir -p /opt/binbash/data
 
-# Install the binary (from your extracted download)
-sudo cp binbash /opt/binbash/
+# Install the binary at exactly /opt/binbash/binbash, the path the service runs.
+# -T makes this stop with an error if a folder is already sitting there.
+sudo install -T -m 755 binbash /opt/binbash/binbash
 
 # Create the config file
 sudo tee /opt/binbash/binbash.toml >/dev/null <<'EOF'
@@ -274,6 +277,30 @@ sudo systemctl enable --now binbash
 ```
 
 The unit sets `WorkingDirectory=/opt/binbash`, so `binbash.toml` there (and the `./data` database path) are picked up with no edits to the unit file. Check on it with `systemctl status binbash` and `journalctl -u binbash -f`.
+
+**Keep source code out of `/opt/binbash`.** The repo, the program and the install folder are all named `binbash`, so cloning or unpacking inside `/opt/binbash` creates a `binbash` *folder* exactly where the service expects the program. If you [build from source](#building-from-source), clone into your home directory and install the binary you built with the `install` line above.
+
+### When the service won't start
+
+`systemctl status binbash` only shows the last few lines. For the real reason, run:
+
+```sh
+sudo journalctl -u binbash -n 30 --no-pager
+```
+
+**`status=203/EXEC`**: systemd couldn't launch the program at all, so binbash never ran. Usually it's one of these:
+
+- **Something other than the program is at `/opt/binbash/binbash`.** Run `ls -la /opt/binbash`. The `binbash` line should start with `-` (a file). If it starts with `d`, it's a folder (usually a source checkout). Move the folder out of the way with `sudo mv /opt/binbash/binbash ~/binbash-src`, then run the `install` line above again.
+- **Wrong download for this machine.** `uname -m` prints `x86_64` if you need `linux-amd64`, or `aarch64` if you need `linux-arm64`. Download the matching release and install its binary.
+
+**`status=1/FAILURE`**: binbash started but stopped itself, and the last lines of the journal say why (for example a config mistake, a port that's already taken, or a directory it can't write to).
+
+After fixing the cause, clear systemd's "restarted too many times" lockout and start it again:
+
+```sh
+sudo systemctl reset-failed binbash
+sudo systemctl start binbash
+```
 
 ## Upgrading
 
@@ -298,10 +325,9 @@ Take a safety copy first: schema migrations only move **forward**, so a new bina
 Then, from your freshly downloaded and extracted release:
 
 ```sh
-sudo systemctl stop binbash                  # let it flush and release the database
-sudo cp binbash /opt/binbash/binbash         # overwrite the old binary
-sudo chown binbash:binbash /opt/binbash/binbash
-sudo systemctl start binbash                 # applies any new migrations on boot
+sudo systemctl stop binbash      # let it flush and release the database
+sudo install -T -o binbash -g binbash -m 755 binbash /opt/binbash/binbash   # replace the old binary
+sudo systemctl start binbash     # applies any new migrations on boot
 ```
 
 Confirm it came back up cleanly with `systemctl status binbash` and `journalctl -u binbash -n 20`; you'll see the usual `binbash <version> listening on :8080`. Your config file and `./data` database are untouched.
@@ -833,7 +859,9 @@ cd binbash
 go build -o binbash .
 ```
 
-That produces the same single static binary the releases ship. To run straight from source during development:
+That produces the same single static binary the releases ship. Clone it somewhere other than `/opt/binbash`, such as your home directory. Otherwise the cloned `binbash` folder ends up where the [systemd service](#running-as-a-service-systemd) expects the program.
+
+To run straight from source during development:
 
 ```sh
 BINBASH_PASSWORD=changeme go run .

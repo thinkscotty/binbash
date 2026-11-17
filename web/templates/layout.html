@@ -19,7 +19,7 @@
   <meta name="htmx-config" content='{"includeIndicatorStyles":false}'>
   <title>binbash</title>
   {{if .MetaRefresh}}<meta http-equiv="refresh" content="{{.MetaRefresh}}">{{end}}
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="{{asset "style.css"}}">
 </head>
 <body>
   <header class="site-header">
@@ -34,7 +34,7 @@
   {{if ne .CurrentPage "login"}}
   <nav class="tab-bar">{{template "navlinks" .}}</nav>
   {{end}}
-  <script src="/static/htmx.min.js"></script>
+  <script src="{{asset "htmx.min.js"}}"></script>
 </body>
 </html>
 {{end}}
